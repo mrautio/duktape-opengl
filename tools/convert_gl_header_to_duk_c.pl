@@ -7,7 +7,9 @@ use strict;
 use warnings;
 
 my $VERSION        = "0.1";
-my $SCOPE_ALL      = "ALL";
+my $SCOPE_PREFIX   = "DUK_GL_";
+my $DEFAULT_SCOPE  = $SCOPE_PREFIX."OPENGL_BASIC";
+my $current_scope  = $DEFAULT_SCOPE; 
 my $DUKTAPE_INDENT = "\t";
 
 my %OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE = (
@@ -156,9 +158,12 @@ sub handle_opengl_constant
 	die("Constant name not defined!") if $opengl_constant_name eq "";
 	die("Constant value not defined!") if $opengl_constant_value eq "";
 
-    #TODO: take out-of-scope constants to scope at some point  
-    #OpenGL constants that are not standard OpenGL constants are out of scope
-    if ($opengl_constant_name =~ m/(MESA|ATI|ARB|EXT)$/) { return; }
+    #Not standard constants will have different scope which is not enabled by default
+    my $previous_scope = $current_scope; 
+    if ($opengl_constant_name =~ m/_(MESA|ATI|ARB|EXT|NV|SUN|SGIX|SGIS)$/)
+    {
+        $current_scope = $SCOPE_PREFIX . $1;
+    }
 
 	#print $handle "Constant found! '$opengl_constant_name' = '$opengl_constant_value'\n";
     my %constant_hash = (
@@ -166,8 +171,8 @@ sub handle_opengl_constant
            "value" => $opengl_constant_value
     );
 
-	push(@{$opengl_constant_map{$SCOPE_ALL}}, \%constant_hash );  
-	
+	push(@{$opengl_constant_map{$current_scope}}, \%constant_hash );
+	$current_scope = $previous_scope;
 }
 
 sub handle_opengl_function
@@ -181,12 +186,15 @@ sub handle_opengl_function
     die("Function arguments not defined!") if $opengl_function_arguments eq "";
       
     #TODO: take out-of-scope functions to scope at some point  
-    #OpenGL functions that
-    # have pointer arguments
-    # are not standard OpenGL functions
-    #are out of scope
+    #OpenGL functions that have pointer arguments are out of scope
     if ($opengl_function_arguments =~ m/\*/) { return; }
-    if ($opengl_function_name =~ m/(MESA|ATI|ARB|EXT)$/) { return; }
+
+    #Not standard functions will have different scope which is not enabled by default    
+    my $previous_scope = $current_scope; 
+    if ($opengl_function_name =~ m/(MESA|ATI|ARB|EXT|NV|SUN|SGIX|SGIS)$/)
+    {
+        $current_scope = $SCOPE_PREFIX . $1;
+    }
     
     #print "Function found! $opengl_function_return_type $opengl_function_name (\n";
     
@@ -214,8 +222,9 @@ sub handle_opengl_function
         "arguments" => \@opengl_function_argument_array
     );
        
-    push(@{$opengl_function_map{$SCOPE_ALL}}, \%function_hash );
+    push(@{$opengl_function_map{$current_scope}}, \%function_hash );
 
+    $current_scope = $previous_scope;
     #print(");\n");
 }
 
@@ -292,6 +301,14 @@ sub process_input_file()
             handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments);
             
             $is_multiple_line_function_definition = 0;
+        }
+        
+        #match partial comment that describes to which version functionality belongs to
+        #Example: * OpenGL 1.2
+        elsif ($_ =~ m/^\s+\*\s+(OpenGL [\d\.]+)/m)
+        {
+        	$current_scope = $SCOPE_PREFIX . uc($1);
+        	$current_scope =~ s/ |\./_/g;
         }
     }   
 }
@@ -381,7 +398,19 @@ sub output_c_file_header
     print $handle get_boilerplate_c_comment();
     
 	print $handle "#include <duktape.h>\n";
-    print $handle "#include <GL/gl.h>\n";   
+    print $handle "#include <GL/gl.h>\n";
+    print $handle "\n";
+    print $handle "#define $DEFAULT_SCOPE\n\n";
+    print $handle get_c_comment("Bindings that are not enabled by default.");
+    foreach my $scope ( sort keys %opengl_function_map )
+    {
+    	if ($scope eq $DEFAULT_SCOPE)
+	    {
+	    	next;
+	    }
+
+        print $handle "/*#define $scope*/\n";
+    }
     print $handle "\n";
 }
 
@@ -528,6 +557,8 @@ sub output_wrapper_functions
 	print $handle get_c_comment("OpenGL wrapper function definitions");
     foreach my $scope ( sort keys %opengl_function_map )
     {
+        print $handle "#ifdef $scope\n";
+
         foreach ( @{$opengl_function_map{$scope}} )
         {
         	my %function = %{$_};
@@ -566,6 +597,8 @@ sub output_wrapper_functions
             }
             print $handle ")\n";
         }
+        
+        print $handle "#endif /* $scope */\n\n";
     }
     print $handle "\n";
 }
@@ -582,12 +615,16 @@ sub output_function_bindings
     
     foreach my $scope ( sort keys %opengl_function_map )
     {
+        print $handle "#ifdef $scope\n";
+
         foreach ( @{$opengl_function_map{$scope}} )
         {
             my %function = %{$_};
 
             print $handle $DUKTAPE_INDENT."$OPENGL_FUNCTION_BIND_MACRO_NAME(ctx, $function{'name'}, ".($#{$function{'arguments'}} + 1).");\n";
         }
+        
+        print $handle "#endif /* $scope */\n\n";
     }
     
     print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";
@@ -606,12 +643,16 @@ sub output_constants
     
     foreach my $scope ( sort keys %opengl_constant_map )
     {
+    	print $handle "#ifdef $scope\n";
+
         foreach ( @{$opengl_constant_map{$scope}} )
         {
             my %constant = %{$_};
 
             print $handle $DUKTAPE_INDENT."$OPENGL_CONSTANT_SET_MACRO_NAME(ctx, $constant{'name'});\n";
         }
+
+        print $handle "#endif /* $scope */\n\n";
     }
     
     print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";

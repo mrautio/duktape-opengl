@@ -6,6 +6,17 @@
 #include <duktape.h>
 #include <GL/gl.h>
 
+#define DUK_GL_OPENGL_BASIC
+
+/*
+ *  Bindings that are not enabled by default.
+ */
+/*#define DUK_GL_ARB*/
+/*#define DUK_GL_ATI*/
+/*#define DUK_GL_MESA*/
+/*#define DUK_GL_OPENGL_1_2*/
+/*#define DUK_GL_OPENGL_1_3*/
+
 /*
  *  Macro for binding OpenGL wrapper C function as Duktape JavaScript function
  */
@@ -279,6 +290,77 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 /*
  *  OpenGL wrapper function definitions
  */
+#ifdef DUK_GL_ARB
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveTextureARB, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveTextureARB, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1dARB, GLenum, uint, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1fARB, GLenum, uint, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1iARB, GLenum, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1sARB, GLenum, uint, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2dARB, GLenum, uint, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2fARB, GLenum, uint, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2iARB, GLenum, uint, GLint, int, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2sARB, GLenum, uint, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3dARB, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3fARB, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3iARB, GLenum, uint, GLint, int, GLint, int, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3sARB, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4dARB, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4fARB, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4iARB, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4sARB, GLenum, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
+#endif /* DUK_GL_ARB */
+
+#ifdef DUK_GL_ATI
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationSeparateATI, GLenum, uint, GLenum, uint)
+#endif /* DUK_GL_ATI */
+
+#ifdef DUK_GL_MESA
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableTraceMESA, GLbitfield, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableTraceMESA, GLbitfield, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndTraceMESA)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTraceAssertAttribMESA, GLbitfield, uint)
+#endif /* DUK_GL_MESA */
+
+#ifdef DUK_GL_OPENGL_1_2
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTexSubImage3D, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorSubTable, GLenum, uint, GLsizei, int, GLint, int, GLint, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorTable, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBlendEquation, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendColor, GLclampf, number, GLclampf, number, GLclampf, number, GLclampf, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glHistogram, GLenum, uint, GLsizei, int, GLenum, uint, GLboolean, boolean)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetHistogram, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMinmax, GLenum, uint, GLenum, uint, GLboolean, boolean)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetMinmax, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameterf, GLenum, uint, GLenum, uint, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameteri, GLenum, uint, GLenum, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyConvolutionFilter1D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyConvolutionFilter2D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
+#endif /* DUK_GL_OPENGL_1_2 */
+
+#ifdef DUK_GL_OPENGL_1_3
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveTexture, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveTexture, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1d, GLenum, uint, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1f, GLenum, uint, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1i, GLenum, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1s, GLenum, uint, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2d, GLenum, uint, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2f, GLenum, uint, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2i, GLenum, uint, GLint, int, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2s, GLenum, uint, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3d, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3f, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3i, GLenum, uint, GLint, int, GLint, int, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3s, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4d, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4f, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4i, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4s, GLenum, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleCoverage, GLclampf, number, GLboolean, boolean)
+#endif /* DUK_GL_OPENGL_1_3 */
+
+#ifdef DUK_GL_OPENGL_BASIC
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearIndex, GLfloat, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearColor, GLclampf, number, GLclampf, number, GLclampf, number, GLclampf, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClear, GLbitfield, uint)
@@ -462,38 +544,8 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glInitNames)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLoadName, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPushName, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopName)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTexSubImage3D, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorSubTable, GLenum, uint, GLsizei, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorTable, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBlendEquation, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendColor, GLclampf, number, GLclampf, number, GLclampf, number, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glHistogram, GLenum, uint, GLsizei, int, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetHistogram, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMinmax, GLenum, uint, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetMinmax, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameterf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameteri, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyConvolutionFilter1D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyConvolutionFilter2D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveTexture, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveTexture, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1d, GLenum, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1f, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1i, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1s, GLenum, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2d, GLenum, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2f, GLenum, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2i, GLenum, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2s, GLenum, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3d, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3f, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3i, GLenum, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3s, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4d, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4f, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4i, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4s, GLenum, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleCoverage, GLclampf, number, GLboolean, boolean)
+#endif /* DUK_GL_OPENGL_BASIC */
+
 
 /*
  *  OpenGL function bindings to JavaScript
@@ -501,6 +553,77 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleCoverage, GLclampf, number, GLboolea
 void duk_gl_bind_opengl_functions(duk_context *ctx)
 {
 	duk_push_global_object(ctx);
+#ifdef DUK_GL_ARB
+	duk_gl_bind_opengl_wrapper(ctx, glActiveTextureARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glClientActiveTextureARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1dARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1fARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1iARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1sARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2dARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2fARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2iARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2sARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3dARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3fARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3iARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3sARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4dARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4fARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4iARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4sARB, 5);
+#endif /* DUK_GL_ARB */
+
+#ifdef DUK_GL_ATI
+	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationSeparateATI, 2);
+#endif /* DUK_GL_ATI */
+
+#ifdef DUK_GL_MESA
+	duk_gl_bind_opengl_wrapper(ctx, glEnableTraceMESA, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glDisableTraceMESA, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEndTraceMESA, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glTraceAssertAttribMESA, 1);
+#endif /* DUK_GL_MESA */
+
+#ifdef DUK_GL_OPENGL_1_2
+	duk_gl_bind_opengl_wrapper(ctx, glCopyTexSubImage3D, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyColorSubTable, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyColorTable, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendEquation, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendColor, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glHistogram, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glResetHistogram, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMinmax, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glResetMinmax, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter1D, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter2D, 6);
+#endif /* DUK_GL_OPENGL_1_2 */
+
+#ifdef DUK_GL_OPENGL_1_3
+	duk_gl_bind_opengl_wrapper(ctx, glActiveTexture, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glClientActiveTexture, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4d, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4f, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4i, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4s, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glSampleCoverage, 2);
+#endif /* DUK_GL_OPENGL_1_3 */
+
+#ifdef DUK_GL_OPENGL_BASIC
 	duk_gl_bind_opengl_wrapper(ctx, glClearIndex, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClearColor, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glClear, 1);
@@ -684,38 +807,8 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glLoadName, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPushName, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPopName, 0);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyTexSubImage3D, 9);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyColorSubTable, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyColorTable, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendEquation, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendColor, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glHistogram, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glResetHistogram, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glMinmax, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glResetMinmax, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterf, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteri, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter1D, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter2D, 6);
-	duk_gl_bind_opengl_wrapper(ctx, glActiveTexture, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glClientActiveTexture, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1d, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1f, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1i, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1s, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2d, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2f, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2i, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2s, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3d, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3f, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3i, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3s, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4d, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4f, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4i, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4s, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glSampleCoverage, 2);
+#endif /* DUK_GL_OPENGL_BASIC */
+
 	duk_pop(ctx);
 }
 
@@ -725,6 +818,292 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 void duk_gl_set_constants(duk_context *ctx)
 {
 	duk_push_global_object(ctx);
+#ifdef DUK_GL_ARB
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE0_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE1_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE2_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE3_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE4_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE5_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE6_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE7_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE8_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE9_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE10_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE11_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE12_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE13_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE14_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE15_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE16_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE17_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE18_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE19_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE20_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE21_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE22_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE23_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE24_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE25_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE26_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE27_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE28_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE29_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE30_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE31_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_ACTIVE_TEXTURE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLIENT_ACTIVE_TEXTURE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TEXTURE_UNITS_ARB);
+#endif /* DUK_GL_ARB */
+
+#ifdef DUK_GL_ATI
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_BLEND_EQUATION_ATI);
+#endif /* DUK_GL_ATI */
+
+#ifdef DUK_GL_MESA
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_ALL_BITS_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_OPERATIONS_BIT_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_PRIMITIVES_BIT_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_ARRAYS_BIT_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_TEXTURES_BIT_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_PIXELS_BIT_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_ERRORS_BIT_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_MASK_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_NAME_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_STENCIL_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_24_8_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_8_24_REV_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_15_1_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_1_15_REV_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_POSITION_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_CALLBACK_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_CALLBACK_FUNC_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_CALLBACK_DATA_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_POSITION_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_CALLBACK_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_CALLBACK_FUNC_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_CALLBACK_DATA_MESA);
+#endif /* DUK_GL_MESA */
+
+#ifdef DUK_GL_OPENGL_1_2
+	duk_gl_push_opengl_constant_property(ctx, GL_RESCALE_NORMAL);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_EDGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ELEMENTS_VERTICES);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ELEMENTS_INDICES);
+	duk_gl_push_opengl_constant_property(ctx, GL_BGR);
+	duk_gl_push_opengl_constant_property(ctx, GL_BGRA);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_BYTE_3_3_2);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_BYTE_2_3_3_REV);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_5_6_5);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_5_6_5_REV);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_4_4_4_4);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_4_4_4_4_REV);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_5_5_5_1);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_1_5_5_5_REV);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_8_8_8_8);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_8_8_8_8_REV);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_10_10_10_2);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_2_10_10_10_REV);
+	duk_gl_push_opengl_constant_property(ctx, GL_LIGHT_MODEL_COLOR_CONTROL);
+	duk_gl_push_opengl_constant_property(ctx, GL_SINGLE_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_SEPARATE_SPECULAR_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MIN_LOD);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LOD);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BASE_LEVEL);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LEVEL);
+	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_POINT_SIZE_RANGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_POINT_SIZE_GRANULARITY);
+	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_LINE_WIDTH_RANGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_LINE_WIDTH_GRANULARITY);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALIASED_POINT_SIZE_RANGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALIASED_LINE_WIDTH_RANGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PACK_SKIP_IMAGES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PACK_IMAGE_HEIGHT);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_SKIP_IMAGES);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_IMAGE_HEIGHT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_3D);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_3D);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_DEPTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_WRAP_R);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_3D_TEXTURE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_3D);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_ONE_MINUS_CONSTANT_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_ONE_MINUS_CONSTANT_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_CONVOLUTION_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_COLOR_MATRIX_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_WIDTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_RED_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_GREEN_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BLUE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_ALPHA_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_LUMINANCE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_INTENSITY_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_1D);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_2D);
+	duk_gl_push_opengl_constant_property(ctx, GL_SEPARABLE_2D);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_MODE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_REDUCE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_WIDTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_HEIGHT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_WIDTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_HEIGHT);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_BORDER);
+	duk_gl_push_opengl_constant_property(ctx, GL_REPLICATE_BORDER);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX_STACK_DEPTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COLOR_MATRIX_STACK_DEPTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_HISTOGRAM);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_WIDTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_RED_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_GREEN_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_BLUE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_ALPHA_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_LUMINANCE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_SINK);
+	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_SINK);
+	duk_gl_push_opengl_constant_property(ctx, GL_TABLE_TOO_LARGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_EQUATION);
+	duk_gl_push_opengl_constant_property(ctx, GL_MIN);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_ADD);
+	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_SUBTRACT);
+	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_REVERSE_SUBTRACT);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_COLOR);
+#endif /* DUK_GL_OPENGL_1_2 */
+
+#ifdef DUK_GL_OPENGL_1_3
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE0);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE1);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE2);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE3);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE4);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE5);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE6);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE7);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE8);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE9);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE10);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE11);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE12);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE13);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE14);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE15);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE16);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE17);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE18);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE19);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE20);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE21);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE22);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE23);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE24);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE25);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE26);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE27);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE28);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE29);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE30);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE31);
+	duk_gl_push_opengl_constant_property(ctx, GL_ACTIVE_TEXTURE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLIENT_ACTIVE_TEXTURE);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TEXTURE_UNITS);
+	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_MAP);
+	duk_gl_push_opengl_constant_property(ctx, GL_REFLECTION_MAP);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_CUBE_MAP);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_X);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_NEGATIVE_X);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_Y);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_Z);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_CUBE_MAP);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CUBE_MAP_TEXTURE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_LUMINANCE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_LUMINANCE_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_INTENSITY);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGBA);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COMPRESSION_HINT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COMPRESSED_IMAGE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COMPRESSED);
+	duk_gl_push_opengl_constant_property(ctx, GL_NUM_COMPRESSED_TEXTURE_FORMATS);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_TEXTURE_FORMATS);
+	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_COVERAGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_ONE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE_VALUE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE_INVERT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_BIT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_MODELVIEW_MATRIX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_PROJECTION_MATRIX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_TEXTURE_MATRIX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_COLOR_MATRIX);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE0_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE1_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE2_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE0_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE1_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE2_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND0_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND1_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND2_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND0_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND1_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND2_ALPHA);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_ADD_SIGNED);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTERPOLATE);
+	duk_gl_push_opengl_constant_property(ctx, GL_SUBTRACT);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PRIMARY_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_PREVIOUS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGBA);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_BORDER);
+#endif /* DUK_GL_OPENGL_1_3 */
+
+#ifdef DUK_GL_OPENGL_BASIC
 	duk_gl_push_opengl_constant_property(ctx, GL_VERSION_1_1);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERSION_1_2);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERSION_1_3);
@@ -1257,218 +1636,8 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIENT_VERTEX_ARRAY_BIT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALL_CLIENT_ATTRIB_BITS);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIENT_ALL_ATTRIB_BITS);
-	duk_gl_push_opengl_constant_property(ctx, GL_RESCALE_NORMAL);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_EDGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ELEMENTS_VERTICES);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ELEMENTS_INDICES);
-	duk_gl_push_opengl_constant_property(ctx, GL_BGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_BGRA);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_BYTE_3_3_2);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_BYTE_2_3_3_REV);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_5_6_5);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_5_6_5_REV);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_4_4_4_4);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_4_4_4_4_REV);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_5_5_5_1);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_1_5_5_5_REV);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_8_8_8_8);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_8_8_8_8_REV);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_10_10_10_2);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_2_10_10_10_REV);
-	duk_gl_push_opengl_constant_property(ctx, GL_LIGHT_MODEL_COLOR_CONTROL);
-	duk_gl_push_opengl_constant_property(ctx, GL_SINGLE_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_SEPARATE_SPECULAR_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MIN_LOD);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LOD);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BASE_LEVEL);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LEVEL);
-	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_POINT_SIZE_RANGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_POINT_SIZE_GRANULARITY);
-	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_LINE_WIDTH_RANGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SMOOTH_LINE_WIDTH_GRANULARITY);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALIASED_POINT_SIZE_RANGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALIASED_LINE_WIDTH_RANGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PACK_SKIP_IMAGES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PACK_IMAGE_HEIGHT);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_SKIP_IMAGES);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_IMAGE_HEIGHT);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_3D);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_3D);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_DEPTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_WRAP_R);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_3D_TEXTURE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_3D);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_ONE_MINUS_CONSTANT_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_ONE_MINUS_CONSTANT_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_CONVOLUTION_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_COLOR_MATRIX_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_RED_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_GREEN_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BLUE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_ALPHA_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_LUMINANCE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_INTENSITY_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_1D);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_2D);
-	duk_gl_push_opengl_constant_property(ctx, GL_SEPARABLE_2D);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_MODE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_REDUCE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_HEIGHT);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_HEIGHT);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_BORDER);
-	duk_gl_push_opengl_constant_property(ctx, GL_REPLICATE_BORDER);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX_STACK_DEPTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COLOR_MATRIX_STACK_DEPTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_HISTOGRAM);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_RED_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_GREEN_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_BLUE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_ALPHA_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_LUMINANCE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_SINK);
-	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_SINK);
-	duk_gl_push_opengl_constant_property(ctx, GL_TABLE_TOO_LARGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_EQUATION);
-	duk_gl_push_opengl_constant_property(ctx, GL_MIN);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_ADD);
-	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_SUBTRACT);
-	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_REVERSE_SUBTRACT);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE0);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE1);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE2);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE3);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE4);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE5);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE6);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE7);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE8);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE9);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE10);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE11);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE12);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE13);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE14);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE15);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE16);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE17);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE18);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE19);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE20);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE21);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE22);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE23);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE24);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE25);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE26);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE27);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE28);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE29);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE30);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE31);
-	duk_gl_push_opengl_constant_property(ctx, GL_ACTIVE_TEXTURE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLIENT_ACTIVE_TEXTURE);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TEXTURE_UNITS);
-	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_MAP);
-	duk_gl_push_opengl_constant_property(ctx, GL_REFLECTION_MAP);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_CUBE_MAP);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_X);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_NEGATIVE_X);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_Y);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_Z);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_CUBE_MAP);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CUBE_MAP_TEXTURE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_LUMINANCE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_LUMINANCE_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_INTENSITY);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGBA);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COMPRESSION_HINT);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COMPRESSED_IMAGE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COMPRESSED);
-	duk_gl_push_opengl_constant_property(ctx, GL_NUM_COMPRESSED_TEXTURE_FORMATS);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_TEXTURE_FORMATS);
-	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_COVERAGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_ONE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE_VALUE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE_INVERT);
-	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_BIT);
-	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_MODELVIEW_MATRIX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_PROJECTION_MATRIX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_TEXTURE_MATRIX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_COLOR_MATRIX);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE0_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE1_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE2_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE0_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE1_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE2_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND0_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND1_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND2_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND0_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND1_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND2_ALPHA);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_ADD_SIGNED);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTERPOLATE);
-	duk_gl_push_opengl_constant_property(ctx, GL_SUBTRACT);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT);
-	duk_gl_push_opengl_constant_property(ctx, GL_PRIMARY_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_PREVIOUS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGB);
-	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGBA);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_BORDER);
+#endif /* DUK_GL_OPENGL_BASIC */
+
 	duk_pop(ctx);
 }
 
