@@ -8,7 +8,7 @@ use warnings;
 
 my $VERSION        = "0.1";
 my $SCOPE_PREFIX   = "DUK_GL_";
-my $DEFAULT_SCOPE  = $SCOPE_PREFIX."OPENGL_BASIC";
+my $DEFAULT_SCOPE  = $SCOPE_PREFIX."OPENGL_1_1";
 my $current_scope  = $DEFAULT_SCOPE; 
 my $DUKTAPE_INDENT = "\t";
 
@@ -17,28 +17,35 @@ my %OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE = (
     "GLboolean"  => "boolean",
     "GLbitfield" => "uint",
     "GLint"      => "int",
+    "GLint64"    => "int",
+    "GLint64EXT" => "int",
     "GLsizei"    => "int",
     "GLshort"    => "int",
     "GLbyte"     => "int",
+    "GLfixed"    => "int",
     "GLubyte"    => "uint",
     "GLushort"   => "uint",
     "GLuint"     => "uint",
+    "GLuint64"   => "uint",
+    "GLuint64EXT"=> "uint",
     "GLfloat"    => "number",
     "GLclampf"   => "number",
     "GLdouble"   => "number",
-    "GLclampd"   => "number"
+    "GLclampd"   => "number",
+    "GLhalfNV"   => "uint"
 );
 
 my $OPENGL_FUNCTION_BIND_MACRO_NAME = "duk_gl_bind_opengl_wrapper";
 my $OPENGL_CONSTANT_SET_MACRO_NAME  = "duk_gl_push_opengl_constant_property";
 
 my $use_stdout = 0;
-my $input_file = "";
+my $input_files = "";
 my $output_h_file = "";
 my $output_c_file = "";
 my $max_function_argument_count = 0;
 my %opengl_constant_map = ();
 my %opengl_function_map = ();
+my %opengl_scope_map    = ();
 
 my $CMD_ARG_HELP       = "--help";
 my $CMD_ARG_USAGE      = "--usage";
@@ -55,7 +62,7 @@ sub print_version
 
 sub print_usage
 {
-    print "Usage: $0 $CMD_ARG_INPUT gl.h $CMD_ARG_OUTPUT_H duktape_opengl.h $CMD_ARG_OUTPUT_C duktape_opengl.c\n";
+    print "Usage: $0 $CMD_ARG_INPUT \"gl.h glext.h\" $CMD_ARG_OUTPUT_H duktape_opengl.h $CMD_ARG_OUTPUT_C duktape_opengl.c\n";
 }
 
 sub print_help
@@ -104,7 +111,7 @@ sub process_arguments
         elsif ($argument eq $CMD_ARG_INPUT)
         {
             $i++;
-            $input_file = $ARGV[$i];
+            $input_files = $ARGV[$i];
         }
         elsif ($argument eq $CMD_ARG_OUTPUT_H)
         {
@@ -133,12 +140,16 @@ sub validate_arguments()
         exit();
 	}
 
-	if (!-f $input_file)
-	{
-		print "ERROR: $CMD_ARG_INPUT requires existing file as the parameter! invalid argument:'$CMD_ARG_INPUT $input_file'\n\n";
-		print_usage();
-		exit(1);
-	}
+	my @file_list = split(" ", $input_files);
+    foreach my $input_file (@file_list)
+    {
+        if (!-f $input_file)
+        {
+		    print "ERROR: $CMD_ARG_INPUT requires existing file(s) as the parameter! invalid_argument:'$CMD_ARG_INPUT $input_files', invalid_file:'$input_file'\n\n";
+		    print_usage();
+		    exit(1);
+        }
+    }
 	
 	if ($output_h_file eq ""
 	    && $output_c_file eq ""
@@ -160,7 +171,7 @@ sub handle_opengl_constant
 
     #Not standard constants will have different scope which is not enabled by default
     my $previous_scope = $current_scope; 
-    if ($opengl_constant_name =~ m/_(MESA|ATI|ARB|EXT|NV|SUN|SGIX|SGIS)$/)
+    if ($opengl_constant_name =~ m/_(ARB|ATI|EXT|HP|IBM|KTX|INTEL|NV|MESA|SGI|SGIX|SUN|WIN)$/)
     {
         $current_scope = $SCOPE_PREFIX . $1;
     }
@@ -171,7 +182,10 @@ sub handle_opengl_constant
            "value" => $opengl_constant_value
     );
 
-	push(@{$opengl_constant_map{$current_scope}}, \%constant_hash );
+	$opengl_constant_map{$current_scope."/".$opengl_constant_name} = \%constant_hash;
+	
+	$opengl_scope_map{$current_scope} = 1;
+	
 	$current_scope = $previous_scope;
 }
 
@@ -186,12 +200,15 @@ sub handle_opengl_function
     die("Function arguments not defined!") if $opengl_function_arguments eq "";
       
     #TODO: take out-of-scope functions to scope at some point  
-    #OpenGL functions that have pointer arguments are out of scope
-    if ($opengl_function_arguments =~ m/\*/) { return; }
+    #OpenGL functions that have pointer or constant arguments are out of scope
+    if ($opengl_function_arguments =~ m/\*|const/) { return; }
+    #pointer returns and arguments are out of scope
+    if ($opengl_function_return_type =~ m/GL\w*(ptr|handle|vdpau|sync)/
+        || $opengl_function_arguments =~ m/GL\w*(ptr|handle|vdpau|sync)/) { return; }
 
     #Not standard functions will have different scope which is not enabled by default    
     my $previous_scope = $current_scope; 
-    if ($opengl_function_name =~ m/(MESA|ATI|ARB|EXT|NV|SUN|SGIX|SGIS)$/)
+    if ($opengl_function_name =~ m/(ARB|ATI|EXT|HP|IBM|KTX|INTEL|NV|MESA|SGI|SGIX|SUN|WIN)$/)
     {
         $current_scope = $SCOPE_PREFIX . $1;
     }
@@ -222,13 +239,15 @@ sub handle_opengl_function
         "arguments" => \@opengl_function_argument_array
     );
        
-    push(@{$opengl_function_map{$current_scope}}, \%function_hash );
+    $opengl_function_map{$current_scope."/".$opengl_function_name} = \%function_hash;
+    
+    $opengl_scope_map{$current_scope} = 1;
 
     $current_scope = $previous_scope;
     #print(");\n");
 }
 
-sub process_input_file()
+sub process_input_files()
 {
 	my $is_multiple_line_function_definition = 0;
 	
@@ -236,81 +255,97 @@ sub process_input_file()
     my $opengl_function_name          = "";
     my $opengl_function_arguments     = "";
     
-    open(HEADER_FILE, '<', $input_file);
-    while(<HEADER_FILE>)
+    my @file_list = split(" ", $input_files);
+    foreach my $input_file (@file_list)
     {
-        chomp;
-        
-        #match OpenGL constant definitions
-        #example: #define GL_LINE_LOOP   0x0002
-        if ($_ =~ m/^#define (W?GL[A-Z0-9_]+)\s+((0x)?[0-9A-F]+).*$/m)
-        {
-        	if ($is_multiple_line_function_definition)
-        	{
-                die("Parsing error while parsing multiline function! function:'$opengl_function_return_type $opengl_function_name'");
-        	}
-
-            my $opengl_constant_name  = $1;
-            my $opengl_constant_value = $2;
-            
-            handle_opengl_constant($opengl_constant_name, $opengl_constant_value);
-        }
-        
-        #match OpenGL single line function definitions
-        #example: GLAPI void GLAPIENTRY glVertex2f( GLfloat x, GLfloat y );
-        elsif ($_ =~ m/^GLAPI\s+(\w+)\s+GLAPIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s,_]+)\s*\)\s*;.*$/m)
-        {
-            if ($is_multiple_line_function_definition)
+	    open(HEADER_FILE, '<', $input_file);
+	    while(<HEADER_FILE>)
+	    {
+	        chomp;
+	        
+	        #match OpenGL constant definitions
+	        #example: #define GL_LINE_LOOP   0x0002
+	        if ($_ =~ m/^#define (W?GL[A-Z0-9_]+)\s+((0x)?[0-9A-F]+).*$/m)
+	        {
+	            if ($is_multiple_line_function_definition)
+	            {
+	                die("Parsing error while parsing multiline function! function:'$opengl_function_return_type $opengl_function_name'");
+	            }
+	
+	            my $opengl_constant_name  = $1;
+	            my $opengl_constant_value = $2;
+	            
+	            handle_opengl_constant($opengl_constant_name, $opengl_constant_value);
+	        }
+	       #GLAPI void APIENTRY glMultiTexCoord3s (GLenum target, GLshort s, GLshort t, GLshort r); 
+	        #match OpenGL single line function definitions
+	        #example: GLAPI void GLAPIENTRY glVertex2f( GLfloat x, GLfloat y );
+	        elsif ($_ =~ m/^GLAPI\s+(\w+)\s+G?L?APIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s,_]+)\s*\)\s*;.*$/m)
+	        {
+	            if ($is_multiple_line_function_definition)
+	            {
+	                die("Parsing error while parsing multiline function! function:'$opengl_function_return_type $opengl_function_name'");
+	            }
+	
+	            $opengl_function_return_type   = $1;
+	            $opengl_function_name          = $2;
+	            $opengl_function_arguments     = $3;
+	            
+	            handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments);
+	        }
+	        
+	        #match OpenGL multiline function definitions
+	        #example:
+	        #GLAPI void GLAPIENTRY glOrtho( GLdouble left, GLdouble right,
+	        #                         GLdouble bottom, GLdouble top,
+	        #                         GLdouble near_val, GLdouble far_val );
+	        elsif ($_ =~ m/^GLAPI\s+(\w+)\s+GLAPIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s\*,_]+)\s*$/m)
+	        {
+	            if ($is_multiple_line_function_definition)
+	            {
+	                die("Parsing error while parsing multiline function! function:'$opengl_function_return_type $opengl_function_name'");
+	            }
+	
+	            $opengl_function_return_type   = $1;
+	            $opengl_function_name          = $2;
+	            $opengl_function_arguments     = $3;
+	
+	            $is_multiple_line_function_definition = 1;
+	        }
+	        elsif ($is_multiple_line_function_definition && $_ =~ m/^\s+([\w\d\s\*,_]+)\s*$/m)
+	        {
+	            $opengl_function_arguments .= $1;
+	        }
+	        elsif ($is_multiple_line_function_definition && $_ =~ m/^\s+([\w\d\s\*,_]+)\s*\)\s*;.*$/m)
+	        {
+	            $opengl_function_arguments .= $1;
+	
+	            handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments);
+	            
+	            $is_multiple_line_function_definition = 0;
+	        }
+	        
+	        #match partial comment that describes to which version functionality belongs to
+	        #Example: * OpenGL 1.2
+	        elsif ($_ =~ m/^\s+\*\s+(OpenGL [\d\.]+)/m)
+	        {
+	            $current_scope = $SCOPE_PREFIX . uc($1);
+	            $current_scope =~ s/ |\./_/g;
+	        }
+            #match partial comment that describes to which version functionality belongs to
+            #Example: * OpenGL 1.2
+            elsif ($_ =~ m/^#ifndef\s+GL_VERSION_(\d+_\d+)/m)
             {
-                die("Parsing error while parsing multiline function! function:'$opengl_function_return_type $opengl_function_name'");
+                $current_scope = $SCOPE_PREFIX . "OPENGL_" . $1;
+
+                #OpenGL 1.0 and 1.1 shall be in the same scope (1.1)
+                if ($current_scope eq $SCOPE_PREFIX . "OPENGL_1_0")
+                {
+                	$current_scope = $DEFAULT_SCOPE;
+                }
             }
-
-            $opengl_function_return_type   = $1;
-            $opengl_function_name          = $2;
-            $opengl_function_arguments     = $3;
-            
-            handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments);
-        }
-        
-        #match OpenGL multiline function definitions
-        #example:
-        #GLAPI void GLAPIENTRY glOrtho( GLdouble left, GLdouble right,
-        #                         GLdouble bottom, GLdouble top,
-        #                         GLdouble near_val, GLdouble far_val );
-        elsif ($_ =~ m/^GLAPI\s+(\w+)\s+GLAPIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s\*,_]+)\s*$/m)
-        {
-            if ($is_multiple_line_function_definition)
-            {
-                die("Parsing error while parsing multiline function! function:'$opengl_function_return_type $opengl_function_name'");
-            }
-
-            $opengl_function_return_type   = $1;
-            $opengl_function_name          = $2;
-            $opengl_function_arguments     = $3;
-
-            $is_multiple_line_function_definition = 1;
-        }
-        elsif ($is_multiple_line_function_definition && $_ =~ m/^\s+([\w\d\s\*,_]+)\s*$/m)
-        {
-        	$opengl_function_arguments .= $1;
-        }
-        elsif ($is_multiple_line_function_definition && $_ =~ m/^\s+([\w\d\s\*,_]+)\s*\)\s*;.*$/m)
-        {
-            $opengl_function_arguments .= $1;
-
-            handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments);
-            
-            $is_multiple_line_function_definition = 0;
-        }
-        
-        #match partial comment that describes to which version functionality belongs to
-        #Example: * OpenGL 1.2
-        elsif ($_ =~ m/^\s+\*\s+(OpenGL [\d\.]+)/m)
-        {
-        	$current_scope = $SCOPE_PREFIX . uc($1);
-        	$current_scope =~ s/ |\./_/g;
-        }
-    }   
+	    }
+    }
 }
 
 sub validate_processed_data()
@@ -369,6 +404,7 @@ sub output_header_file
     print $handle "#endif\n";
     
     print $handle "\n";
+    print $handle "DUK_EXTERNAL_DECL void duk_gl_push_opengl_bindings(duk_context *ctx);\n";
     print $handle "DUK_EXTERNAL_DECL void duk_gl_bind_opengl_functions(duk_context *ctx);\n";
     print $handle "DUK_EXTERNAL_DECL void duk_gl_set_constants(duk_context *ctx);\n";
     print $handle "\n";
@@ -398,19 +434,52 @@ sub output_c_file_header
     print $handle get_boilerplate_c_comment();
     
 	print $handle "#include <duktape.h>\n";
-    print $handle "#include <GL/gl.h>\n";
+    my @file_list = split(" ", $input_files);
+    foreach my $input_file (@file_list)
+    {
+	    print $handle "#include <GL/$input_file>\n";
+    }
     print $handle "\n";
     print $handle "#define $DEFAULT_SCOPE\n\n";
     print $handle get_c_comment("Bindings that are not enabled by default.");
-    foreach my $scope ( sort keys %opengl_function_map )
+    my $is_opengl_version_scope_handling = 0;
+    foreach my $scope ( sort keys %opengl_scope_map )
     {
-    	if ($scope eq $DEFAULT_SCOPE)
-	    {
-	    	next;
-	    }
+        if ($scope =~ m/OPENGL/)
+        {
+	        if ($scope eq $DEFAULT_SCOPE)
+	        {
+	        	$is_opengl_version_scope_handling = 1;
+				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_4X\n";
+				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_3X\n";
+				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_2X\n";
+				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_1X\n";
+	        }
+	        elsif ($scope =~ m/OPENGL_(\d+)_0/)
+	        {
+	        	print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_".($1-1)."X*/\n";
+	        }
 
-        print $handle "/*#define $scope*/\n";
+        	print $handle "#define $scope\n";
+        }
+        else
+        {
+        	if ($is_opengl_version_scope_handling == 1)
+        	{
+	            print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_4X*/\n";
+	            $is_opengl_version_scope_handling = 0;
+        	}
+
+        	print $handle "/*#define $scope*/\n";
+        }
     }
+    
+    if ($is_opengl_version_scope_handling == 1)
+    {
+        print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_4X*/\n";
+        $is_opengl_version_scope_handling = 0;
+    }
+
     print $handle "\n";
 }
 
@@ -555,52 +624,77 @@ sub output_wrapper_functions
     my $handle = $_[0];
 
 	print $handle get_c_comment("OpenGL wrapper function definitions");
-    foreach my $scope ( sort keys %opengl_function_map )
+    my $old_scope = "";
+    foreach my $key ( sort keys %opengl_function_map )
     {
-        print $handle "#ifdef $scope\n";
-
-        foreach ( @{$opengl_function_map{$scope}} )
+        my($scope, $constant_name) = split("/", $key);
+        
+        if ($old_scope ne "" && $old_scope ne $scope)
         {
-        	my %function = %{$_};
-        	
-        	my $return_type_count = 0;
-        	if ($function{'return_type'} !~ m/(void|GLvoid)/)
-        	{
-        		$return_type_count = 1;
-        	}
-        	
-        	
-        	if (${$function{'arguments'}}[0] =~ m/(void|GLvoid)/)
-        	{
-        		@{$function{'arguments'}} = ();
-        	}
-
-            print $handle get_opengl_function_wrapper_macro_name($return_type_count, ($#{$function{'arguments'}} + 1))."($function{'name'}";
-            if ($return_type_count == 1)
-            {
-                my $c_function_argument_type = $function{'return_type'};
-                my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
-                
-                die "Could not convert return type to duk push type! function:'$function{'name'}', argument_type:'$c_function_argument_type'" if $duk_push_type eq "";
-
-            	print $handle ", $duk_push_type";
-            }
-            
-            foreach ( @{$function{'arguments'}} )
-            {
-            	my $c_function_argument_type = (split(" ", $_))[0];
-            	my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
-            	
-            	die "Could not convert argument type to duk push type! function:'$function{'name'}', argument_type:'$c_function_argument_type'" if $duk_push_type eq "";
-            	
-                print $handle ", $c_function_argument_type, $duk_push_type";
-            }
-            print $handle ")\n";
+            print $handle "#endif /* $old_scope */\n\n";
         }
         
-        print $handle "#endif /* $scope */\n\n";
+        if ($old_scope ne $scope)
+        {
+            $old_scope = $scope;
+            print $handle "#ifdef $scope\n";
+        }
+
+        my %function = %{$opengl_function_map{$key}};
+            
+        my $return_type_count = 0;
+        if ($function{'return_type'} !~ m/(void|GLvoid)/)
+        {
+            $return_type_count = 1;
+        }
+            
+            
+        if (${$function{'arguments'}}[0] =~ m/(void|GLvoid)/)
+        {
+            @{$function{'arguments'}} = ();
+        }
+
+        print $handle get_opengl_function_wrapper_macro_name($return_type_count, ($#{$function{'arguments'}} + 1))."($function{'name'}";
+        if ($return_type_count == 1)
+        {
+            my $c_function_argument_type = $function{'return_type'};
+            my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
+                
+            die "Could not convert return type to duk push type! function:'$function{'name'}', argument_type:'$c_function_argument_type'" if $duk_push_type eq "";
+
+            print $handle ", $duk_push_type";
+        }
+            
+        foreach ( @{$function{'arguments'}} )
+        {
+            my $c_function_argument_type = (split(" ", $_))[0];
+            my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
+                
+            die "Could not convert argument type to duk push type! function:'$function{'name'}', argument_type:'$c_function_argument_type'" if $duk_push_type eq "";
+                
+            print $handle ", $c_function_argument_type, $duk_push_type";
+        }
+        print $handle ")\n";
     }
-    print $handle "\n";
+    if ($old_scope ne "")
+    {
+        print $handle "#endif /* $old_scope */\n\n";
+    }
+}
+
+sub output_initialization_function
+{
+    die "Expecting file handle as the argument!" if scalar(@_) != 1;
+    my $handle = $_[0];
+    
+    print $handle get_c_comment("Push OpenGL bindings to JavaScript global object");
+    print $handle "void duk_gl_push_opengl_bindings(duk_context *ctx)\n";
+    print $handle "{\n";
+    print $handle $DUKTAPE_INDENT."duk_push_global_object(ctx);\n";
+	print $handle $DUKTAPE_INDENT."duk_gl_bind_opengl_functions(ctx);\n";
+	print $handle $DUKTAPE_INDENT."duk_gl_set_constants(ctx);\n";
+    print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";
+    print $handle "}\n\n";
 }
 
 sub output_function_bindings
@@ -611,23 +705,32 @@ sub output_function_bindings
     print $handle get_c_comment("OpenGL function bindings to JavaScript");
     print $handle "void duk_gl_bind_opengl_functions(duk_context *ctx)\n";
     print $handle "{\n";
-    print $handle $DUKTAPE_INDENT."duk_push_global_object(ctx);\n";
     
-    foreach my $scope ( sort keys %opengl_function_map )
+    my $old_scope = "";
+    foreach my $key ( sort keys %opengl_function_map )
     {
-        print $handle "#ifdef $scope\n";
-
-        foreach ( @{$opengl_function_map{$scope}} )
+        my($scope, $constant_name) = split("/", $key);
+        
+        if ($old_scope ne "" && $old_scope ne $scope)
         {
-            my %function = %{$_};
-
-            print $handle $DUKTAPE_INDENT."$OPENGL_FUNCTION_BIND_MACRO_NAME(ctx, $function{'name'}, ".($#{$function{'arguments'}} + 1).");\n";
+            print $handle "#endif /* $old_scope */\n\n";
         }
         
-        print $handle "#endif /* $scope */\n\n";
+        if ($old_scope ne $scope)
+        {
+            $old_scope = $scope;
+            print $handle "#ifdef $scope\n";
+        }
+
+        my %function = %{$opengl_function_map{$key}};
+            
+        print $handle $DUKTAPE_INDENT."$OPENGL_FUNCTION_BIND_MACRO_NAME(ctx, $function{'name'}, ".($#{$function{'arguments'}} + 1).");\n";
+    }
+    if ($old_scope ne "")
+    {
+        print $handle "#endif /* $old_scope */\n\n";
     }
     
-    print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";
     print $handle "}\n\n";
 }
 
@@ -639,23 +742,32 @@ sub output_constants
     print $handle get_c_comment("OpenGL constants to JavaScript");
     print $handle "void duk_gl_set_constants(duk_context *ctx)\n";
     print $handle "{\n";
-    print $handle $DUKTAPE_INDENT."duk_push_global_object(ctx);\n";
     
-    foreach my $scope ( sort keys %opengl_constant_map )
+    my $old_scope = "";
+    foreach my $key ( sort keys %opengl_constant_map )
     {
-    	print $handle "#ifdef $scope\n";
-
-        foreach ( @{$opengl_constant_map{$scope}} )
+    	my($scope, $constant_name) = split("/", $key);
+    	
+        if ($old_scope ne "" && $old_scope ne $scope)
         {
-            my %constant = %{$_};
-
-            print $handle $DUKTAPE_INDENT."$OPENGL_CONSTANT_SET_MACRO_NAME(ctx, $constant{'name'});\n";
+            print $handle "#endif /* $old_scope */\n\n";
         }
+        
+    	if ($old_scope ne $scope)
+    	{
+    		$old_scope = $scope;
+    		print $handle "#ifdef $scope\n";
+    	}
+        
+        my %constant = %{$opengl_constant_map{$key}};
 
-        print $handle "#endif /* $scope */\n\n";
+        print $handle $DUKTAPE_INDENT."$OPENGL_CONSTANT_SET_MACRO_NAME(ctx, $constant{'name'});\n";
+    }
+    if ($old_scope ne "")
+    {
+        print $handle "#endif /* $old_scope */\n\n";
     }
     
-    print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";
     print $handle "}\n\n";
 }
 
@@ -668,7 +780,7 @@ sub main()
 	process_arguments();
 	validate_arguments();
 	
-	process_input_file();
+	process_input_files();
 	validate_processed_data();
 	
 	if ($output_h_file ne "" || $use_stdout)
@@ -706,6 +818,7 @@ sub main()
 	    
 	    output_function_bindings($c);
 	    output_constants($c);
+	    output_initialization_function($c);
 
         if ($output_c_file ne "")
         {
