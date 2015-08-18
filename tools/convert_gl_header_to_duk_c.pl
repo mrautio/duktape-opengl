@@ -467,7 +467,7 @@ sub output_wrapper_function_macro
 	    }
 	    print $handle ") \\\n";
 	    
-	    print $handle "static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \\\n";
+	    print $handle "DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \\\n";
 	    print $handle "{ \\\n";
 	    if ($return_type_count == 0)
 	    {
@@ -494,7 +494,7 @@ sub output_wrapper_function_macro
         
         print $handle ") \\\n";
         
-        print $handle "static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \\\n";
+        print $handle "DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \\\n";
         print $handle "{ \\\n";
 
         if ($return_type_count == 0)

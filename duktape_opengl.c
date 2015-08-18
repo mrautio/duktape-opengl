@@ -40,21 +40,21 @@
  *  - Duktape push type 1 = Duktape API's duk_to_... function's type name, for example, duk_to_number
  */
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(c_function_name) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name(); \
 	return 0; \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(c_function_name, rettypedef1) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name()); \
 	return 1; \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(c_function_name, argtypedef1, arg1) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0) \
@@ -63,7 +63,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(c_function_name, rettypedef1, argtypedef1, arg1) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0) \
@@ -72,7 +72,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(c_function_name, argtypedef1, arg1, argtypedef2, arg2) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -82,7 +82,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -92,7 +92,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -103,7 +103,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -114,7 +114,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -126,7 +126,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -138,7 +138,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -151,7 +151,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -164,7 +164,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -178,7 +178,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG6(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -192,7 +192,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -207,7 +207,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG7(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -222,7 +222,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -238,7 +238,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG8(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -254,7 +254,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
@@ -271,7 +271,7 @@ static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 }
 
 #define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG9(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9) \
-static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
+DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
 	duk_push_##rettypedef1(ctx, c_function_name( \
 		(argtypedef1)duk_to_##arg1(ctx, 0),  \
