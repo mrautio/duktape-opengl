@@ -450,14 +450,27 @@ sub output_c_file_header
 	        if ($scope eq $DEFAULT_SCOPE)
 	        {
 	        	$is_opengl_version_scope_handling = 1;
+
+                print $handle "\n";
+                print $handle get_c_comment("Enable automatically older OpenGL standard manjor versions, if higher major version is enabled");
 				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_4X\n";
+				print $handle "#define ".$SCOPE_PREFIX."OPENGL_3X\n";
+				print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_4X*/\n\n";
+				
 				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_3X\n";
+				print $handle "#define ".$SCOPE_PREFIX."OPENGL_2X\n";
+				print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_3X*/\n\n";
+				
 				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_2X\n";
-				print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_1X\n";
+				print $handle "#define ".$SCOPE_PREFIX."OPENGL_1X\n";
+				print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_2X*/\n\n";
+				
+				print $handle "#ifdef  ".$SCOPE_PREFIX."OPENGL_1X\n";
 	        }
 	        elsif ($scope =~ m/OPENGL_(\d+)_0/)
 	        {
-	        	print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_".($1-1)."X*/\n";
+	        	print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_".($1-1)."X*/\n\n";
+	        	print $handle "#ifdef  ".$SCOPE_PREFIX."OPENGL_".($1)."X\n";
 	        }
 
         	print $handle "#define $scope\n";
@@ -466,7 +479,7 @@ sub output_c_file_header
         {
         	if ($is_opengl_version_scope_handling == 1)
         	{
-	            print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_4X*/\n";
+	            print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_4X*/\n\n";
 	            $is_opengl_version_scope_handling = 0;
         	}
 

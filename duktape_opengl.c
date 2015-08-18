@@ -20,24 +20,43 @@
 /*#define DUK_GL_INTEL*/
 /*#define DUK_GL_MESA*/
 /*#define DUK_GL_NV*/
+
+/*
+ *  Enable automatically older OpenGL standard manjor versions, if higher major version is enabled
+ */
 #ifdef DUK_GL_OPENGL_4X
+#define DUK_GL_OPENGL_3X
+#endif /*DUK_GL_OPENGL_4X*/
+
 #ifdef DUK_GL_OPENGL_3X
+#define DUK_GL_OPENGL_2X
+#endif /*DUK_GL_OPENGL_3X*/
+
 #ifdef DUK_GL_OPENGL_2X
-#ifdef DUK_GL_OPENGL_1X
+#define DUK_GL_OPENGL_1X
+#endif /*DUK_GL_OPENGL_2X*/
+
+#ifdef  DUK_GL_OPENGL_1X
 #define DUK_GL_OPENGL_1_1
 #define DUK_GL_OPENGL_1_2
 #define DUK_GL_OPENGL_1_3
 #define DUK_GL_OPENGL_1_4
 #define DUK_GL_OPENGL_1_5
 #endif /*DUK_GL_OPENGL_1X*/
+
+#ifdef  DUK_GL_OPENGL_2X
 #define DUK_GL_OPENGL_2_0
 #define DUK_GL_OPENGL_2_1
 #endif /*DUK_GL_OPENGL_2X*/
+
+#ifdef  DUK_GL_OPENGL_3X
 #define DUK_GL_OPENGL_3_0
 #define DUK_GL_OPENGL_3_1
 #define DUK_GL_OPENGL_3_2
 #define DUK_GL_OPENGL_3_3
 #endif /*DUK_GL_OPENGL_3X*/
+
+#ifdef  DUK_GL_OPENGL_4X
 #define DUK_GL_OPENGL_4_0
 #define DUK_GL_OPENGL_4_1
 #define DUK_GL_OPENGL_4_2
@@ -45,6 +64,7 @@
 #define DUK_GL_OPENGL_4_4
 #define DUK_GL_OPENGL_4_5
 #endif /*DUK_GL_OPENGL_4X*/
+
 /*#define DUK_GL_SGI*/
 /*#define DUK_GL_SGIX*/
 /*#define DUK_GL_SUN*/

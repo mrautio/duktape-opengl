@@ -13,10 +13,10 @@ Setup
 
 Defines
 =======
-* DUK_GL_OPENGL_4X  - Enable OpenGL 4.x
-* DUK_GL_OPENGL_3X  - Enable OpenGL 3.x
-* DUK_GL_OPENGL_2X  - Enable OpenGL 2.x
-* DUK_GL_OPENGL_1X  - Enable OpenGL 1.x
+* DUK_GL_OPENGL_4X  - Enable OpenGL 4.x and older major versions
+* DUK_GL_OPENGL_3X  - Enable OpenGL 3.x and older major versions
+* DUK_GL_OPENGL_2X  - Enable OpenGL 2.x and older major versions
+* DUK_GL_OPENGL_1X  - Enable OpenGL 1.x and older major versions
 * DUK_GL_OPENGL_N_X - Enable OpenGL N.X (for example DUK_GL_OPENGL_1_2)
 * DUK_GL_ARB        – Enable extensions officially approved by the OpenGL Architecture Review Board
 * DUK_GL_ATI        – Enable ATI Technologies extensions
