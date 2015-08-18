@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 DUK_EXTERNAL_DECL void duk_gl_bind_opengl_functions(duk_context *ctx);
+DUK_EXTERNAL_DECL void duk_gl_set_constants(duk_context *ctx);
 
 /*
  *  C++ name mangling

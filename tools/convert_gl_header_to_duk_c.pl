@@ -28,7 +28,9 @@ my %OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE = (
 );
 
 my $OPENGL_FUNCTION_BIND_MACRO_NAME = "duk_gl_bind_opengl_wrapper";
+my $OPENGL_CONSTANT_SET_MACRO_NAME  = "duk_gl_push_opengl_constant_property";
 
+my $use_stdout = 0;
 my $input_file = "";
 my $output_h_file = "";
 my $output_c_file = "";
@@ -42,6 +44,7 @@ my $CMD_ARG_VERSION    = "--version";
 my $CMD_ARG_INPUT      = "--input";
 my $CMD_ARG_OUTPUT_H   = "--output-h";
 my $CMD_ARG_OUTPUT_C   = "--output-c";
+my $CMD_ARG_STDOUT     = "--stdout";
 
 sub print_version
 {
@@ -68,6 +71,7 @@ sub print_help
     print "$CMD_ARG_INPUT <opengl header>           - OpenGL header that needs to be processed\n";
     print "$CMD_ARG_OUTPUT_H <GL wrapper header>    - Duktape OpenGL wrapper .h output file\n";
     print "$CMD_ARG_OUTPUT_C <GL wrapper source>    - Duktape OpenGL wrapper .c output file\n";
+    print "$CMD_ARG_STDOUT                          - Output as STDOUT\n";
 }
 
 sub process_arguments
@@ -91,6 +95,10 @@ sub process_arguments
 	        print_version();
 	        exit();
 	    }
+        elsif ($argument eq $CMD_ARG_STDOUT)
+        {
+            $use_stdout = 1;
+        }
         elsif ($argument eq $CMD_ARG_INPUT)
         {
             $i++;
@@ -131,9 +139,10 @@ sub validate_arguments()
 	}
 	
 	if ($output_h_file eq ""
-	    && $output_c_file eq "")
+	    && $output_c_file eq ""
+	    && !$use_stdout)
     {
-        print "ERROR: Invalid arguments! One of the following must be provided $CMD_ARG_OUTPUT_H or $CMD_ARG_OUTPUT_C\n\n";
+        print "ERROR: Invalid arguments! One of the following must be provided $CMD_ARG_STDOUT, $CMD_ARG_OUTPUT_H or $CMD_ARG_OUTPUT_C\n\n";
         print_usage();
         exit(1);
     }
@@ -152,12 +161,12 @@ sub handle_opengl_constant
     if ($opengl_constant_name =~ m/(MESA|ATI|ARB|EXT)$/) { return; }
 
 	#print $handle "Constant found! '$opengl_constant_name' = '$opengl_constant_value'\n";
-	
-	push(@{$opengl_constant_map{$SCOPE_ALL}}, (
-		   "name" => $opengl_constant_name,
-		   "value" => $opengl_constant_value,
-	   )
-	);  
+    my %constant_hash = (
+           "name" => $opengl_constant_name,
+           "value" => $opengl_constant_value
+    );
+
+	push(@{$opengl_constant_map{$SCOPE_ALL}}, \%constant_hash );  
 	
 }
 
@@ -173,11 +182,9 @@ sub handle_opengl_function
       
     #TODO: take out-of-scope functions to scope at some point  
     #OpenGL functions that
-    # return something
     # have pointer arguments
     # are not standard OpenGL functions
     #are out of scope
-    if ($opengl_function_return_type !~ m/(void|GLvoid)$/) { return; }
     if ($opengl_function_arguments =~ m/\*/) { return; }
     if ($opengl_function_name =~ m/(MESA|ATI|ARB|EXT)$/) { return; }
     
@@ -346,6 +353,7 @@ sub output_header_file
     
     print $handle "\n";
     print $handle "DUK_EXTERNAL_DECL void duk_gl_bind_opengl_functions(duk_context *ctx);\n";
+    print $handle "DUK_EXTERNAL_DECL void duk_gl_set_constants(duk_context *ctx);\n";
     print $handle "\n";
     
     print $handle get_c_comment("C++ name mangling");
@@ -388,6 +396,18 @@ sub output_binding_function_macro
 	print $handle $DUKTAPE_INDENT."duk_put_prop_string((ctx), -2, #c_function_name)\n\n";
 }
 
+sub output_property_set_macro
+{
+    die "Expecting file handle as the argument!" if scalar(@_) != 1;
+    my $handle = $_[0];
+
+    print $handle get_c_comment("Macro for setting OpenGL constants");
+    print $handle "#define $OPENGL_CONSTANT_SET_MACRO_NAME(ctx, opengl_constant) \\\n";
+    print $handle $DUKTAPE_INDENT."duk_push_uint((ctx), (opengl_constant)); \\\n";
+    print $handle $DUKTAPE_INDENT."duk_put_prop_string((ctx), -2, #opengl_constant)\n\n";
+}
+
+
 sub get_opengl_function_wrapper_macro_name
 {
     my $return_type_count       = $_[0];
@@ -407,21 +427,37 @@ sub output_wrapper_function_macro
     
     die("Invalid return type count! count:'$return_type_count'") if $return_type_count eq "" || $return_type_count < 0;
     die("Invalid function argument count! count:'$function_argument_count'") if $function_argument_count eq "" || $function_argument_count < 0;
-    
-    #TODO: extend support of return types
-    die("Only void returns supported!") if $return_type_count != 0;
-        
+    die("Only void or single type function returns are supported!") if $return_type_count > 1;
+
     if ($function_argument_count == 0)
     {
-	    print $handle "#define ".get_opengl_function_wrapper_macro_name($return_type_count, $function_argument_count)."(c_function_name) \\\n";
+	    print $handle "#define ".get_opengl_function_wrapper_macro_name($return_type_count, $function_argument_count)."(c_function_name";
+	    if ($return_type_count == 1)
+	    {
+	    	print $handle ", rettypedef1";
+	    }
+	    print $handle ") \\\n";
+	    
 	    print $handle "static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \\\n";
 	    print $handle "{ \\\n";
-        print $handle $DUKTAPE_INDENT."c_function_name(); \\\n";
+	    if ($return_type_count == 0)
+	    {
+	    	print $handle $DUKTAPE_INDENT."c_function_name(); \\\n";
+	    }
+	    else
+	    {
+	    	print $handle $DUKTAPE_INDENT."duk_push_##rettypedef1(ctx, c_function_name()); \\\n";
+	    }
     }
     else
     {
         print $handle "#define ".get_opengl_function_wrapper_macro_name($return_type_count, $function_argument_count)."(c_function_name";
         
+        if ($return_type_count == 1)
+        {
+            print $handle ", rettypedef1";
+        }
+
         for(my $i = 1; $i <= $function_argument_count; $i++)
         {
         	print $handle ", argtypedef$i, arg$i";
@@ -431,7 +467,15 @@ sub output_wrapper_function_macro
         
         print $handle "static duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \\\n";
         print $handle "{ \\\n";
-        print $handle $DUKTAPE_INDENT."c_function_name( \\\n";
+
+        if ($return_type_count == 0)
+        {
+            print $handle $DUKTAPE_INDENT."c_function_name( \\\n";
+        }
+        else
+        {
+        	print $handle $DUKTAPE_INDENT."duk_push_##rettypedef1(ctx, c_function_name( \\\n";
+        }
 
         for(my $i = 1; $i <= $function_argument_count; $i++)
         {
@@ -443,7 +487,12 @@ sub output_wrapper_function_macro
             print $handle " \\\n";
         }
         
-        print $handle $DUKTAPE_INDENT."); \\\n";
+        print $handle $DUKTAPE_INDENT;
+        if ($return_type_count == 1)
+        {
+        	print $handle ")";
+        }
+        print $handle "); \\\n";
     }
     
     print $handle $DUKTAPE_INDENT."return $return_type_count; \\\n";
@@ -464,10 +513,10 @@ sub output_wrapper_function_macros
 	   ."- Duktape push type 1 = Duktape API's duk_to_... function's type name, for example, duk_to_number\n"
 	);
 	
-	my $ret_i = 0;
 	for(my $arg_i = 0; $arg_i <= $max_function_argument_count + 1; $arg_i++)
 	{
-		output_wrapper_function_macro($handle, $ret_i, $arg_i);
+		output_wrapper_function_macro($handle, 0, $arg_i);
+		output_wrapper_function_macro($handle, 1, $arg_i);
 	}
 }
 
@@ -496,6 +545,15 @@ sub output_wrapper_functions
         	}
 
             print $handle get_opengl_function_wrapper_macro_name($return_type_count, ($#{$function{'arguments'}} + 1))."($function{'name'}";
+            if ($return_type_count == 1)
+            {
+                my $c_function_argument_type = $function{'return_type'};
+                my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
+                
+                die "Could not convert return type to duk push type! function:'$function{'name'}', argument_type:'$c_function_argument_type'" if $duk_push_type eq "";
+
+            	print $handle ", $duk_push_type";
+            }
             
             foreach ( @{$function{'arguments'}} )
             {
@@ -533,7 +591,31 @@ sub output_function_bindings
     }
     
     print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";
-    print $handle "}\n";
+    print $handle "}\n\n";
+}
+
+sub output_constants
+{
+    die "Expecting file handle as the argument!" if scalar(@_) != 1;
+    my $handle = $_[0];
+    
+    print $handle get_c_comment("OpenGL constants to JavaScript");
+    print $handle "void duk_gl_set_constants(duk_context *ctx)\n";
+    print $handle "{\n";
+    print $handle $DUKTAPE_INDENT."duk_push_global_object(ctx);\n";
+    
+    foreach my $scope ( sort keys %opengl_constant_map )
+    {
+        foreach ( @{$opengl_constant_map{$scope}} )
+        {
+            my %constant = %{$_};
+
+            print $handle $DUKTAPE_INDENT."$OPENGL_CONSTANT_SET_MACRO_NAME(ctx, $constant{'name'});\n";
+        }
+    }
+    
+    print $handle $DUKTAPE_INDENT."duk_pop(ctx);\n";
+    print $handle "}\n\n";
 }
 
 #
@@ -548,29 +630,46 @@ sub main()
 	process_input_file();
 	validate_processed_data();
 	
-	if ($output_h_file ne "")
+	if ($output_h_file ne "" || $use_stdout)
 	{
-	    open(my $h, '>', $output_h_file) or die "Could not open file '$output_h_file' for writing $!";
+		my $h = \*STDOUT;
+		if ($output_h_file ne "")
+		{
+            open($h, '>', $output_h_file) or die "Could not open file '$output_h_file' for writing $!";
+		}
 	    
 	    output_header_file($h);
 	    
-	    close($h);
+	    if ($output_h_file ne "")
+	    {
+	    	close($h);
+	    }
 	}
 	
-    if ($output_c_file ne "")
+    if ($output_c_file ne "" || $use_stdout)
     {
-        open(my $c, '>', $output_c_file) or die "Could not open file '$output_c_file' for writing $!";
+    	my $c = \*STDOUT;
+    	if ($output_c_file ne "")
+    	{
+            open($c, '>', $output_c_file) or die "Could not open file '$output_c_file' for writing $!";
+    	}
 
 	    output_c_file_header($c);
 	
-	    output_binding_function_macro($c);	    
+	    output_binding_function_macro($c);
+	    output_property_set_macro($c);
+	    
 	    output_wrapper_function_macros($c);
 	    
 	    output_wrapper_functions($c);
 	    
 	    output_function_bindings($c);
+	    output_constants($c);
 
-        close($c);
+        if ($output_c_file ne "")
+        {
+            close($c);
+        }
     }
 
 	exit();
