@@ -4,8 +4,14 @@
  */
 
 #include <duktape.h>
+
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
+#else
 #include <GL/gl.h>
 #include <GL/glext.h>
+#endif
 
 #define DUK_GL_OPENGL_1_1
 
