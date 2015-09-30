@@ -32,7 +32,9 @@ my %OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE = (
     "GLclampf"   => "number",
     "GLdouble"   => "number",
     "GLclampd"   => "number",
-    "GLhalfNV"   => "uint"
+    "GLhalfNV"   => "uint",
+    "const GLchar *const*" => "string", 
+    "const GLchar *" => "string"
 );
 
 my $OPENGL_FUNCTION_BIND_MACRO_NAME = "duk_gl_bind_opengl_wrapper";
@@ -198,10 +200,18 @@ sub handle_opengl_function
     die("Function return type not defined!") if $opengl_function_return_type eq "";
     die("Function name not defined!") if $opengl_function_name eq "";
     die("Function arguments not defined!") if $opengl_function_arguments eq "";
-      
+    
+    #remove heading and tailing whitespaces
+    $opengl_function_arguments =~ s/^\s+|\s+$//g;
+    #remove whitespaces between comma separators
+    $opengl_function_arguments =~ s/\s*,\s*/,/g;
+    #convert multiple whitespaces into single space
+    $opengl_function_arguments =~ s/\s+/ /g;
+
     #TODO: take out-of-scope functions to scope at some point  
     #OpenGL functions that have pointer or constant arguments are out of scope
-    if ($opengl_function_arguments =~ m/\*|const/) { return; }
+    if ($opengl_function_arguments =~ m/\*|const/ && ($opengl_function_arguments !~ m/const GLchar \*/ || $opengl_function_arguments =~ m/\*.*\*/)) { return; }
+    
     #pointer returns and arguments are out of scope
     if ($opengl_function_return_type =~ m/GL\w*(ptr|handle|vdpau|sync)/
         || $opengl_function_arguments =~ m/GL\w*(ptr|handle|vdpau|sync)/) { return; }
@@ -214,13 +224,6 @@ sub handle_opengl_function
     }
     
     #print "Function found! $opengl_function_return_type $opengl_function_name (\n";
-    
-    #remove heading and tailing whitespaces
-    $opengl_function_arguments =~ s/^\s+|\s+$//g;
-    #remove whitespaces between comma separators
-    $opengl_function_arguments =~ s/\s*,\s*/,/g;
-    #convert multiple whitespaces into single space
-    $opengl_function_arguments =~ s/\s+/ /g;
     
     my @opengl_function_argument_array = split(",", $opengl_function_arguments);
     #foreach my $argument (@opengl_function_argument_array)
@@ -263,6 +266,9 @@ sub process_input_files()
         {
             chomp;
             
+            #process white spaces
+            $_ =~ s/\s+/ /g;
+            
             #match OpenGL constant definitions
             #example: #define GL_LINE_LOOP   0x0002
             if ($_ =~ m/^#define (W?GL[A-Z0-9_]+)\s+((0x)?[0-9A-F]+).*$/m)
@@ -280,7 +286,7 @@ sub process_input_files()
            #GLAPI void APIENTRY glMultiTexCoord3s (GLenum target, GLshort s, GLshort t, GLshort r); 
             #match OpenGL single line function definitions
             #example: GLAPI void GLAPIENTRY glVertex2f( GLfloat x, GLfloat y );
-            elsif ($_ =~ m/^GLAPI\s+(\w+)\s+G?L?APIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s,_]+)\s*\)\s*;.*$/m)
+            elsif ($_ =~ m/^GLAPI\s+(\w+)\s+G?L?APIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s\*,_]+)\s*\)\s*;.*$/m)
             {
                 if ($is_multiple_line_function_definition)
                 {
@@ -528,6 +534,76 @@ sub output_property_set_macro
 }
 
 
+sub output_array_handling_macros
+{
+    die "Expecting file handle as the argument!" if scalar(@_) != 1;
+    my $handle = $_[0];
+    
+    print $handle get_c_comment("Macro for handling of arrays");
+
+    print $handle "static size_t duk_gl_determine_array_length(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, size_t num)\n";
+    print $handle "{\n";
+    print $handle $DUKTAPE_INDENT."size_t array_length = sz;\n";
+    print $handle $DUKTAPE_INDENT."if (sz < 1)\n";
+    print $handle $DUKTAPE_INDENT."{\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."/* use <arrayVariable>.length is array size not explicitly defined */\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_get_prop_string(ctx, obj_index, \"length\");\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."array_length = (unsigned int)duk_get_uint(ctx, -1);\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_pop(ctx);\n";
+    print $handle $DUKTAPE_INDENT."}\n";
+    print $handle $DUKTAPE_INDENT."/* prevent buffer overflow by clamping the value */\n";
+    print $handle $DUKTAPE_INDENT."if (array_length > num)\n";
+    print $handle $DUKTAPE_INDENT."{\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."array_length = num;\n";
+    print $handle $DUKTAPE_INDENT."}\n";
+    print $handle $DUKTAPE_INDENT."return array_length;\n";
+    print $handle "}\n\n";
+
+    print $handle "#define DUK_GL_ARRAY_PROCESSING_FUNCTION(argtypedef1, arg1) \\\n";
+    print $handle "static size_t duk_gl_get_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \\\n";
+    print $handle "{ \\\n";
+    print $handle $DUKTAPE_INDENT."if (duk_is_array(ctx, obj_index)) \\\n";
+    print $handle $DUKTAPE_INDENT."{ \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_get_prop(ctx, obj_index); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."size_t array_length = duk_gl_determine_array_length(ctx, obj_index, sz, num); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."unsigned int i = 0; \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."for(i=0; i<array_length; i++) \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."{ \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_get_prop_index(ctx, obj_index, (duk_uarridx_t)i); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT.$DUKTAPE_INDENT."array[i] = (argtypedef1)duk_get_##arg1(ctx, -1); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_pop(ctx); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."} \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_pop(ctx); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."return array_length; \\\n";
+    print $handle $DUKTAPE_INDENT."} \\\n";
+    print $handle $DUKTAPE_INDENT."return 0; \\\n";
+    print $handle "} \\\n";
+    print $handle "static size_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \\\n";
+    print $handle "{ \\\n";
+    print $handle $DUKTAPE_INDENT."if (duk_is_array(ctx, obj_index)) \\\n";
+    print $handle $DUKTAPE_INDENT."{ \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_get_prop(ctx, obj_index); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."size_t array_length = duk_gl_determine_array_length(ctx, obj_index, sz, num); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."unsigned int i = 0; \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."for(i=0; i<array_length; i++) \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."{ \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_push_##arg1(ctx, (argtypedef1)array[i]); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_put_prop_index(ctx, obj_index, (duk_uarridx_t)i); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."} \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_pop(ctx); \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."return array_length; \\\n";
+    print $handle $DUKTAPE_INDENT."} \\\n";
+    print $handle $DUKTAPE_INDENT."return 0; \\\n";
+    print $handle "}\n\n";
+    
+    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLbyte, number)\n";
+    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLdouble, number)\n";
+    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLfloat, number)\n";
+    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLint, number)\n";
+    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLshort, number)\n";
+    print $handle "\n";
+}
+
 sub get_opengl_function_wrapper_macro_name
 {
     my $return_type_count       = $_[0];
@@ -689,7 +765,10 @@ sub output_wrapper_functions
             
         foreach ( @{$function{'arguments'}} )
         {
-            my $c_function_argument_type = (split(" ", $_))[0];
+            my $c_function_argument_type = $_;
+            $c_function_argument_type =~ s/[\w\d]+$//;
+            $c_function_argument_type =~ s/\s+$//;
+            
             my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
                 
             die "Could not convert argument type to duk push type! function:'$function{'name'}', argument_type:'$c_function_argument_type'" if $duk_push_type eq "";
@@ -833,6 +912,8 @@ sub main()
     
         output_binding_function_macro($c);
         output_property_set_macro($c);
+        
+        output_array_handling_macros($c);
         
         output_wrapper_function_macros($c);
         

@@ -91,6 +91,70 @@
 	duk_put_prop_string((ctx), -2, #opengl_constant)
 
 /*
+ *  Macro for handling of arrays
+ */
+static size_t duk_gl_determine_array_length(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, size_t num)
+{
+	size_t array_length = sz;
+	if (sz < 1)
+	{
+		/* use <arrayVariable>.length is array size not explicitly defined */
+		duk_get_prop_string(ctx, obj_index, "length");
+		array_length = (unsigned int)duk_get_uint(ctx, -1);
+		duk_pop(ctx);
+	}
+	/* prevent buffer overflow by clamping the value */
+	if (array_length > num)
+	{
+		array_length = num;
+	}
+	return array_length;
+}
+
+#define DUK_GL_ARRAY_PROCESSING_FUNCTION(argtypedef1, arg1) \
+static size_t duk_gl_get_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \
+{ \
+	if (duk_is_array(ctx, obj_index)) \
+	{ \
+		duk_get_prop(ctx, obj_index); \
+		size_t array_length = duk_gl_determine_array_length(ctx, obj_index, sz, num); \
+		unsigned int i = 0; \
+		for(i=0; i<array_length; i++) \
+		{ \
+			duk_get_prop_index(ctx, obj_index, (duk_uarridx_t)i); \
+			array[i] = (argtypedef1)duk_get_##arg1(ctx, -1); \
+			duk_pop(ctx); \
+		} \
+		duk_pop(ctx); \
+		return array_length; \
+	} \
+	return 0; \
+} \
+static size_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \
+{ \
+	if (duk_is_array(ctx, obj_index)) \
+	{ \
+		duk_get_prop(ctx, obj_index); \
+		size_t array_length = duk_gl_determine_array_length(ctx, obj_index, sz, num); \
+		unsigned int i = 0; \
+		for(i=0; i<array_length; i++) \
+		{ \
+			duk_push_##arg1(ctx, (argtypedef1)array[i]); \
+			duk_put_prop_index(ctx, obj_index, (duk_uarridx_t)i); \
+		} \
+		duk_pop(ctx); \
+		return array_length; \
+	} \
+	return 0; \
+}
+
+DUK_GL_ARRAY_PROCESSING_FUNCTION(GLbyte, number)
+DUK_GL_ARRAY_PROCESSING_FUNCTION(GLdouble, number)
+DUK_GL_ARRAY_PROCESSING_FUNCTION(GLfloat, number)
+DUK_GL_ARRAY_PROCESSING_FUNCTION(GLint, number)
+DUK_GL_ARRAY_PROCESSING_FUNCTION(GLshort, number)
+
+/*
  *  Wrapper macros for OpenGL C functions.
  *  Macro name defines the amount of return types and function arguments it supports.
  *  Macros take arguments in following manner (<Function name>, <OpenGL variable type 1>, <Duktape push type 1>, ...N)
@@ -607,6 +671,8 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendFunciARB, GLuint, uint, GLenum, uint,
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glClampColorARB, GLenum, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveTextureARB, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCurrentPaletteMatrixARB, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glDebugMessageInsertARB, GLenum, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLsizei, int, const GLchar *, string)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDeleteNamedStringARB, GLint, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableVertexAttribArrayARB, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glDispatchComputeGroupSizeARB, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawArraysInstancedARB, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int)
@@ -622,6 +688,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGetTextureHandleARB, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetTextureSamplerHandleARB, uint, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsBufferARB, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsImageHandleResidentARB, boolean, GLuint64, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsNamedStringARB, boolean, GLint, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsProgramARB, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsQueryARB, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTextureHandleResidentARB, boolean, GLuint64, uint)
@@ -771,6 +838,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glArrayElementEXT, GLint, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginTransformFeedbackEXT, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glBeginVertexShaderEXT)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindBufferBaseEXT, GLenum, uint, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindFragDataLocationEXT, GLuint, uint, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindFramebufferEXT, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glBindImageTextureEXT, GLuint, uint, GLuint, uint, GLint, int, GLboolean, boolean, GLint, int, GLenum, uint, GLint, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glBindLightParameterEXT, uint, GLenum, uint, GLenum, uint)
@@ -818,6 +886,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTextureImage2DEXT, GLuint, uint, GLenu
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glCopyTextureSubImage1DEXT, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTextureSubImage2DEXT, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glCopyTextureSubImage3DEXT, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glCreateShaderProgramEXT, uint, GLenum, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeleteVertexShaderEXT, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthBoundsEXT, GLclampd, number, GLclampd, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableClientStateIndexedEXT, GLenum, uint, GLuint, uint)
@@ -853,16 +922,19 @@ DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGenVertexShadersEXT, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGenerateMipmapEXT, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glGenerateMultiTexMipmapEXT, GLenum, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glGenerateTextureMipmapEXT, GLuint, uint, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetFragDataLocationEXT, int, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetUniformBufferSizeEXT, int, GLuint, uint, GLint, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glHistogramEXT, GLenum, uint, GLsizei, int, GLenum, uint, GLboolean, boolean)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glIndexFuncEXT, GLenum, uint, GLclampf, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glIndexMaterialEXT, GLenum, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glInsertComponentEXT, GLuint, uint, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glInsertEventMarkerEXT, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsEnabledIndexedEXT, boolean, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsFramebufferEXT, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsRenderbufferEXT, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTextureEXT, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsVariantEnabledEXT, boolean, GLuint, uint, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glLabelObjectEXT, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLockArraysEXT, GLint, int, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glMatrixFrustumEXT, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMatrixLoadIdentityEXT, GLenum, uint)
@@ -926,6 +998,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4iEXT, GLuint, uint, GLint, 
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4uiEXT, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glProvokingVertexEXT, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPushClientAttribDefaultEXT, GLbitfield, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPushGroupMarkerEXT, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterSamplesEXT, GLuint, uint, GLboolean, boolean)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRenderbufferStorageEXT, GLenum, uint, GLenum, uint, GLsizei, int, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glRenderbufferStorageMultisampleEXT, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
@@ -1034,6 +1107,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glWindowPos4sMESA, GLshort, int, GLshort, in
 #endif /* DUK_GL_MESA */
 
 #ifdef DUK_GL_NV
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glActiveVaryingNV, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBeginConditionalRenderNV, GLuint, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginOcclusionQueryNV, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginTransformFeedbackNV, GLenum, uint)
@@ -1086,6 +1160,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetPathLengthNV, number, GLuint, uint, GLs
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGetStageIndexNV, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGetTextureHandleNV, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetTextureSamplerHandleNV, uint, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetVaryingLocationNV, int, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glIndexFormatNV, GLenum, uint, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glInterpolatePathsNV, GLuint, uint, GLuint, uint, GLuint, uint, GLfloat, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsBufferResidentNV, boolean, GLenum, uint)
@@ -1479,6 +1554,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glUnmapBuffer, boolean, GLenum, uint)
 
 #ifdef DUK_GL_OPENGL_2_0
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glAttachShader, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindAttribLocation, GLuint, uint, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationSeparate, GLenum, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCompileShader, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(glCreateProgram, uint)
@@ -1488,6 +1564,8 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeleteShader, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDetachShader, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableVertexAttribArray, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableVertexAttribArray, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetAttribLocation, int, GLuint, uint, const GLchar *, string)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetUniformLocation, int, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsProgram, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsShader, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLinkProgram, GLuint, uint)
@@ -1523,6 +1601,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4s, GLuint, uint, GLshort, int
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBeginConditionalRender, GLuint, uint, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginTransformFeedback, GLenum, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindBufferBase, GLenum, uint, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindFragDataLocation, GLuint, uint, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindFramebuffer, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindRenderbuffer, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBindVertexArray, GLuint, uint)
@@ -1541,6 +1620,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTexture2D, GLenum, uint, GLenum
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFramebufferTexture3D, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTextureLayer, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGenerateMipmap, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetFragDataLocation, int, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsEnabledi, boolean, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsFramebuffer, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsRenderbuffer, boolean, GLuint, uint)
@@ -1563,6 +1643,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribI4ui, GLuint, uint, GLuint, ui
 
 #ifdef DUK_GL_OPENGL_3_1
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawArraysInstanced, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetUniformBlockIndex, uint, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPrimitiveRestartIndex, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexBuffer, GLenum, uint, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniformBlockBinding, GLuint, uint, GLuint, uint, GLuint, uint)
@@ -1577,9 +1658,11 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTexImage3DMultisample, GLenum, uint, GLsiz
 #endif /* DUK_GL_OPENGL_3_2 */
 
 #ifdef DUK_GL_OPENGL_3_3
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBindFragDataLocationIndexed, GLuint, uint, GLuint, uint, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindSampler, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glColorP3ui, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glColorP4ui, GLenum, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetFragDataIndex, int, GLuint, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsSampler, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoordP1ui, GLenum, uint, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoordP2ui, GLenum, uint, GLenum, uint, GLuint, uint)
@@ -1614,6 +1697,8 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendFunci, GLuint, uint, GLenum, uint, GL
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDrawTransformFeedback, GLenum, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDrawTransformFeedbackStream, GLenum, uint, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEndQueryIndexed, GLenum, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetSubroutineIndex, uint, GLuint, uint, GLenum, uint, const GLchar *, string)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetSubroutineUniformLocation, int, GLuint, uint, GLenum, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTransformFeedback, boolean, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMinSampleShading, GLfloat, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPatchParameteri, GLenum, uint, GLint, int)
@@ -1673,12 +1758,18 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTexStorage3D, GLenum, uint, GLsizei, int, 
 
 #ifdef DUK_GL_OPENGL_4_3
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(glCopyImageSubData, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glDebugMessageInsert, GLenum, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDispatchCompute, GLuint, uint, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glFramebufferParameteri, GLenum, uint, GLenum, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetProgramResourceIndex, uint, GLuint, uint, GLenum, uint, const GLchar *, string)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetProgramResourceLocation, int, GLuint, uint, GLenum, uint, const GLchar *, string)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetProgramResourceLocationIndex, int, GLuint, uint, GLenum, uint, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glInvalidateBufferData, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glInvalidateTexImage, GLuint, uint, GLint, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glInvalidateTexSubImage, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glObjectLabel, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopDebugGroup)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glPushDebugGroup, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glShaderStorageBlockBinding, GLuint, uint, GLuint, uint, GLuint, uint)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTexStorage2DMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLboolean, boolean)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTexStorage3DMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
@@ -1724,6 +1815,7 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyConvolutionFilter2D, GLenum, uint, GLe
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyTextureSubImage1D, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTextureSubImage2D, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTextureSubImage3D, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glDebugMessageInsertAMD, GLenum, uint, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRangefOES, GLclampf, number, GLclampf, number)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRangexOES, GLfixed, int, GLfixed, int)
 DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableVertexArrayAttrib, GLuint, uint, GLuint, uint)
@@ -1939,6 +2031,8 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glClampColorARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glClientActiveTextureARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glCurrentPaletteMatrixARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsertARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteNamedStringARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexAttribArrayARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDispatchComputeGroupSizeARB, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysInstancedARB, 4);
@@ -1954,6 +2048,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureSamplerHandleARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsBufferARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsImageHandleResidentARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIsNamedStringARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsProgramARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsQueryARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTextureHandleResidentARB, 1);
@@ -2103,6 +2198,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glBeginTransformFeedbackEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginVertexShaderEXT, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glBindBufferBaseEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBindFragDataLocationEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glBindFramebufferEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindImageTextureEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glBindLightParameterEXT, 2);
@@ -2150,6 +2246,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage1DEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage2DEXT, 9);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage3DEXT, 10);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateShaderProgramEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteVertexShaderEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthBoundsEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableClientStateIndexedEXT, 2);
@@ -2185,16 +2282,19 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateMipmapEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateMultiTexMipmapEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateTextureMipmapEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragDataLocationEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGetUniformBufferSizeEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glHistogramEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexFuncEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexMaterialEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glInsertComponentEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glInsertEventMarkerEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsEnabledIndexedEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsFramebufferEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsRenderbufferEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTextureEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsVariantEnabledEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glLabelObjectEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glLockArraysEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixFrustumEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoadIdentityEXT, 1);
@@ -2258,6 +2358,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4uiEXT, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glProvokingVertexEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPushClientAttribDefaultEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPushGroupMarkerEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterSamplesEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRenderbufferStorageEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glRenderbufferStorageMultisampleEXT, 5);
@@ -2366,6 +2467,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 #endif /* DUK_GL_MESA */
 
 #ifdef DUK_GL_NV
+	duk_gl_bind_opengl_wrapper(ctx, glActiveVaryingNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginConditionalRenderNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginOcclusionQueryNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginTransformFeedbackNV, 1);
@@ -2418,6 +2520,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glGetStageIndexNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureHandleNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureSamplerHandleNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVaryingLocationNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexFormatNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glInterpolatePathsNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glIsBufferResidentNV, 1);
@@ -2811,6 +2914,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 
 #ifdef DUK_GL_OPENGL_2_0
 	duk_gl_bind_opengl_wrapper(ctx, glAttachShader, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glBindAttribLocation, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationSeparate, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCompileShader, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glCreateProgram, 0);
@@ -2820,6 +2924,8 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDetachShader, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexAttribArray, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableVertexAttribArray, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetAttribLocation, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformLocation, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsProgram, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsShader, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLinkProgram, 1);
@@ -2855,6 +2961,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glBeginConditionalRender, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginTransformFeedback, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBindBufferBase, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBindFragDataLocation, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glBindFramebuffer, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindRenderbuffer, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindVertexArray, 1);
@@ -2873,6 +2980,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTexture3D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureLayer, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateMipmap, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragDataLocation, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsEnabledi, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsFramebuffer, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsRenderbuffer, 1);
@@ -2895,6 +3003,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 
 #ifdef DUK_GL_OPENGL_3_1
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysInstanced, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformBlockIndex, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPrimitiveRestartIndex, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexBuffer, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniformBlockBinding, 3);
@@ -2909,9 +3018,11 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 #endif /* DUK_GL_OPENGL_3_2 */
 
 #ifdef DUK_GL_OPENGL_3_3
+	duk_gl_bind_opengl_wrapper(ctx, glBindFragDataLocationIndexed, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glBindSampler, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColorP3ui, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColorP4ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragDataIndex, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsSampler, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP1ui, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP2ui, 3);
@@ -2946,6 +3057,8 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedback, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedbackStream, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glEndQueryIndexed, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSubroutineIndex, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSubroutineUniformLocation, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTransformFeedback, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMinSampleShading, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPatchParameteri, 2);
@@ -3005,12 +3118,18 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 
 #ifdef DUK_GL_OPENGL_4_3
 	duk_gl_bind_opengl_wrapper(ctx, glCopyImageSubData, 15);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsert, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glDispatchCompute, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceIndex, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceLocation, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceLocationIndex, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glInvalidateBufferData, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glInvalidateTexImage, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glInvalidateTexSubImage, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glObjectLabel, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glPopDebugGroup, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glPushDebugGroup, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glShaderStorageBlockBinding, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexStorage2DMultisample, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glTexStorage3DMultisample, 7);
@@ -3056,6 +3175,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage1D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage2D, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage3D, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsertAMD, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthRangefOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthRangexOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexArrayAttrib, 2);
