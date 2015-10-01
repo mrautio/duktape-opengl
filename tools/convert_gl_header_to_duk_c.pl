@@ -7,7 +7,7 @@ use strict;
 use warnings;
 use Data::Dumper;
 
-my $VERSION        = "0.1";
+my $VERSION        = "0.5";
 my $SCOPE_PREFIX   = "DUK_GL_";
 my $DEFAULT_SCOPE  = $SCOPE_PREFIX."OPENGL_1_1";
 my $current_scope  = $DEFAULT_SCOPE; 
@@ -36,9 +36,47 @@ my %OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE = (
     "GLhalfNV"   => "uint",
     "const GLchar * const *" => "string", 
     "const GLchar *" => "string",
-    "const GLubyte *" => "string",
-    "const GLbyte *" => "string",
-    "const GLfloat *" => "DETERMINE"
+    "const GLubyte *" => "DETERMINE",
+    "const GLbyte *" => "DETERMINE",
+    "const GLfloat *" => "DETERMINE",
+    "const GLhalfNV *" => "DETERMINE",
+    "const GLint *" => "DETERMINE",
+    "const GLfixed *" => "DETERMINE",
+    "const GLint64 *" => "DETERMINE",
+    "const GLint64EXT *" => "DETERMINE",
+    "const GLuint64 *" => "DETERMINE",
+    "const GLuint64EXT *" => "DETERMINE",
+    "const GLenum *" => "DETERMINE",
+    "const GLuint *" => "DETERMINE",
+    "const GLushort *" => "DETERMINE",
+    "const GLshort *" => "DETERMINE",
+    "const GLclampf *" => "DETERMINE",
+    "const GLdouble *" => "DETERMINE",
+    "const GLboolean *" => "DETERMINE",
+    "const GLsizei *" => "DETERMINE",
+    #"const void *" => "DETERMINE",
+    #"const void * const *" => "DETERMINE",
+    "GLubyte *" => "DETERMINE",
+    "GLbyte *" => "DETERMINE",
+    "GLfloat *" => "DETERMINE",
+    "GLhalfNV *" => "DETERMINE",
+    "GLint *" => "DETERMINE",
+    "GLfixed *" => "DETERMINE",
+    "GLint64 *" => "DETERMINE",
+    "GLint64EXT *" => "DETERMINE",
+    "GLuint64 *" => "DETERMINE",
+    "GLuint64EXT *" => "DETERMINE",
+    "GLenum *" => "DETERMINE",
+    "GLuint *" => "DETERMINE",
+    "GLushort *" => "DETERMINE",
+    "GLshort *" => "DETERMINE",
+    "GLclampf *" => "DETERMINE",
+    "GLdouble *" => "DETERMINE",
+    "GLboolean *" => "DETERMINE",
+    "GLsizei *" => "DETERMINE",
+    "GLchar *" => "DETERMINE",
+    "GLenum *" => "DETERMINE"
+    #"void *" => "DETERMINE"
 );
 
 my %OPENGL_TYPEDEF_AS_DUK_PUSH_PREDEFINE = (
@@ -46,43 +84,12 @@ my %OPENGL_TYPEDEF_AS_DUK_PUSH_PREDEFINE = (
     "GLDEBUGPROC" => "SKIP",
     "GLDEBUGPROCAMD" => "SKIP",
     "GLprogramcallbackMESA" => "SKIP",
-    "const GLfloat"  => "SKIP",
-    "GLfloat *" => "SKIP",
-    "GLdouble *" => "SKIP",
-    "GLubyte *" => "SKIP",
-    "GLushort *" => "SKIP",
-    "GLuint *" => "SKIP",
-    "GLint *" => "SKIP",
-    "GLint64 *" => "SKIP",
-    "GLint64EXT *" => "SKIP",
-    "GLuint64 *" => "SKIP",
-    "GLuint64EXT *" => "SKIP",
-    "GLchar *" => "SKIP",
-    "GLenum *" => "SKIP",
-    "GLboolean *" => "SKIP",
-    "GLsizei *" => "SKIP",
     "void * *" => "SKIP",
-    "void *" => "SKIP",
-    "GLfixed *" => "SKIP",
-    "const GLhalfNV *" => "SKIP",
-    "const GLint *" => "SKIP",
-    "const GLfixed *" => "SKIP",
-    "const GLint64 *" => "SKIP",
-    "const GLint64EXT *" => "SKIP",
-    "const GLuint64 *" => "SKIP",
-    "const GLuint64EXT *" => "SKIP",
-    "const GLenum *" => "SKIP",
-    "const GLuint *" => "SKIP",
-    "const GLushort *" => "SKIP",
-    "const GLshort *" => "SKIP",
-    "const GLclampf *" => "SKIP",
-    "const GLdouble *" => "SKIP",
-    "const GLboolean *" => "SKIP",
     "const GLboolean * *" => "SKIP",
-    "const GLsizei *" => "SKIP",
+    "const void * *" => "SKIP",
     "const void *" => "SKIP",
     "const void * const *" => "SKIP",
-    "const void * *" => "SKIP"
+    "void *" => "SKIP"
 );
 
 my $OPENGL_FUNCTION_BIND_MACRO_NAME = "duk_gl_bind_opengl_wrapper";
@@ -296,6 +303,12 @@ sub handle_opengl_function
             }
         }
         
+        #strip const out of the argument
+        if ($argument !~ m/\*/)
+        {
+        	$argument =~ s/^const\s*//g;
+        }
+
         my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$argument};
         die "Could not convert argument type to duk push type! function:'$opengl_function_name', argument_type:'$argument'" if $duk_push_type eq "";
     }
@@ -354,7 +367,7 @@ sub process_input_files()
                 
                 handle_opengl_constant($opengl_constant_name, $opengl_constant_value);
             }
-           #GLAPI void APIENTRY glMultiTexCoord3s (GLenum target, GLshort s, GLshort t, GLshort r); 
+            #GLAPI void APIENTRY glMultiTexCoord3s (GLenum target, GLshort s, GLshort t, GLshort r); 
             #match OpenGL single line function definitions
             #example: GLAPI void GLAPIENTRY glVertex2f( GLfloat x, GLfloat y );
             elsif ($_ =~ m/^GLAPI\s+(\w+)\s+G?L?APIENTRY\s+([\w\d]+)\s*\(\s*([\w\d\s\*,_]+)\s*\)\s*;.*$/m)
@@ -370,7 +383,7 @@ sub process_input_files()
                 
                 if (!handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments))
                 {
-                    print STDOUT "* $opengl_function_return_type $opengl_function_name ($opengl_function_arguments)\n";
+                    print STDOUT "$opengl_function_return_type $opengl_function_name ( $opengl_function_arguments);\n";
                 }
             }
             
@@ -402,7 +415,7 @@ sub process_input_files()
     
                 if (!handle_opengl_function($opengl_function_return_type, $opengl_function_name, $opengl_function_arguments))
                 {
-                    print STDOUT "* $opengl_function_return_type $opengl_function_name ($opengl_function_arguments)\n";
+                    print STDOUT "$opengl_function_return_type $opengl_function_name ( $opengl_function_arguments);\n";
                 }
 
                 $is_multiple_line_function_definition = 0;
@@ -550,7 +563,7 @@ sub output_c_file_header
                 $is_opengl_version_scope_handling = 1;
 
                 print $handle "\n";
-                print $handle get_c_comment("Enable automatically older OpenGL standard manjor versions, if higher major version is enabled");
+                print $handle get_c_comment("Enable automatically older OpenGL standard major versions, if higher major version is enabled");
                 print $handle "#ifdef ".$SCOPE_PREFIX."OPENGL_4X\n";
                 print $handle "#define ".$SCOPE_PREFIX."OPENGL_3X\n";
                 print $handle "#endif /*".$SCOPE_PREFIX."OPENGL_4X*/\n\n";
@@ -642,7 +655,7 @@ sub output_array_handling_macros
     print $handle $DUKTAPE_INDENT."return array_length;\n";
     print $handle "}\n\n";
 
-    print $handle "#define DUK_GL_ARRAY_PROCESSING_FUNCTION(argtypedef1, arg1) \\\n";
+    print $handle "#define DUK_GL_ARRAY_GET_FUNCTION(argtypedef1, arg1) \\\n";
     print $handle "DUK_LOCAL argtypedef1 *duk_gl_get_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \\\n";
     print $handle "{ \\\n";
     print $handle $DUKTAPE_INDENT."if (duk_is_array(ctx, obj_index)) \\\n";
@@ -657,9 +670,11 @@ sub output_array_handling_macros
     print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."} \\\n";
     print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."return array; \\\n";
     print $handle $DUKTAPE_INDENT."} \\\n";
-    print $handle $DUKTAPE_INDENT."return array; \\\n";
-    print $handle "} \\\n";
-    print $handle "DUK_LOCAL size_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \\\n";
+    print $handle $DUKTAPE_INDENT."return NULL; \\\n";
+    print $handle "}\n\n";
+
+    print $handle "#define DUK_GL_ARRAY_PUT_FUNCTION(argtypedef1, arg1) \\\n";
+    print $handle "DUK_LOCAL duk_bool_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \\\n";
     print $handle "{ \\\n";
     print $handle $DUKTAPE_INDENT."if (duk_is_array(ctx, obj_index)) \\\n";
     print $handle $DUKTAPE_INDENT."{ \\\n";
@@ -672,16 +687,32 @@ sub output_array_handling_macros
     print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_put_prop_index(ctx, obj_index, (duk_uarridx_t)i); \\\n";
     print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."} \\\n";
     print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."duk_pop(ctx); \\\n";
-    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."return array_length; \\\n";
+    print $handle $DUKTAPE_INDENT.$DUKTAPE_INDENT."return 1; \\\n";
     print $handle $DUKTAPE_INDENT."} \\\n";
     print $handle $DUKTAPE_INDENT."return 0; \\\n";
     print $handle "}\n\n";
     
-    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLbyte, number)\n";
-    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLdouble, number)\n";
-    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLfloat, number)\n";
-    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLint, number)\n";
-    print $handle "DUK_GL_ARRAY_PROCESSING_FUNCTION(GLshort, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLboolean, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLboolean, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLbyte, number)\n";
+    #print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLbyte, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLubyte, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLubyte, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLdouble, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLdouble, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLfloat, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLfloat, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLclampf, number)\n";
+    #print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLclampf, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLint, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLint, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLuint, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLuint, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLshort, number)\n";
+    #print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLshort, number)\n";
+    print $handle "DUK_GL_ARRAY_GET_FUNCTION(GLushort, number)\n";
+    print $handle "DUK_GL_ARRAY_PUT_FUNCTION(GLushort, number)\n";
+
     print $handle "\n";
 }
 
@@ -854,6 +885,12 @@ sub output_wrapper_functions
         foreach ( @{$function{'arguments'}} )
         {
             my $c_function_argument_type = $_;
+
+            #strip const out of the non-array argument
+            if ($c_function_argument_type !~ m/\*/)
+            {
+            	$c_function_argument_type =~ s/^const\s*//g;
+            }
             
             my $duk_push_type = $OPENGL_TYPEDEF_AS_DUK_PUSH_TYPE{$c_function_argument_type};
                 
@@ -904,8 +941,17 @@ sub output_wrapper_functions
                     #print STDOUT "Found function! dynamic:'$is_dynamic_size_definition', 1:'$functionDefinition', 2:'$arrayNumber1',3:'$arrayNumber2',4:'$arrayType',arraySize:'$arraySize',name:'$opengl_function_name', args:'$opengl_function_arguments'\n";
                 }
 
+                my $basicType = $c_function_argument_type;
+                $basicType =~ s/const//g;
+                $basicType =~ s/[\*\s]//g;
+                
                 my $variable_name = "var$argi";
-                $macro_body .= ", $c_function_argument_type, duk_gl_get_GLfloat_array(ctx, $argi, $arraySize, $variable_name, $arraySize)";
+                $macro_body .= ", $c_function_argument_type, duk_gl_get_".$basicType."_array(ctx, $argi, $arraySize, $variable_name, $arraySize)";
+
+                if ($c_function_argument_type !~ m/^const/)
+                {
+                    $macro_postprocess .= "duk_gl_put_".$basicType."_array(ctx, $argi, $arraySize, $variable_name, $arraySize); ";
+                }
 
                 my $array_type = $c_function_argument_type;
                 die "2d pointers are not supported! dump:'".Dumper(\%function)."'" if $array_type =~ m/\* \*/; 

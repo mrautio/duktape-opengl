@@ -1,6 +1,10 @@
 /*
- *  Duktape OpenGL wrapper 0.1.
+ *  Duktape OpenGL 0.5 - OpenGL bindings for Duktape embeddable Javascript engine.
  *  See AUTHORS.rst and LICENSE.txt for copyright and licensing information.
+ *  
+ *  Duktape OpenGL: https://github.com/mrautio/duktape-opengl/
+ *  Duktape: http://duktape.org/
+ *  OpenGL API reference: https://www.opengl.org/registry/
  */
 
 #include <duktape.h>
@@ -28,7 +32,7 @@
 /*#define DUK_GL_NV*/
 
 /*
- *  Enable automatically older OpenGL standard manjor versions, if higher major version is enabled
+ *  Enable automatically older OpenGL standard major versions, if higher major version is enabled
  */
 #ifdef DUK_GL_OPENGL_4X
 #define DUK_GL_OPENGL_3X
@@ -93,7 +97,7 @@
 /*
  *  Macro for handling of arrays
  */
-static size_t duk_gl_determine_array_length(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, size_t num)
+DUK_LOCAL size_t duk_gl_determine_array_length(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, size_t num)
 {
 	size_t array_length = sz;
 	if (sz < 1)
@@ -111,12 +115,11 @@ static size_t duk_gl_determine_array_length(duk_context *ctx, duk_idx_t obj_inde
 	return array_length;
 }
 
-#define DUK_GL_ARRAY_PROCESSING_FUNCTION(argtypedef1, arg1) \
-static size_t duk_gl_get_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \
+#define DUK_GL_ARRAY_GET_FUNCTION(argtypedef1, arg1) \
+DUK_LOCAL argtypedef1 *duk_gl_get_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \
 { \
 	if (duk_is_array(ctx, obj_index)) \
 	{ \
-		duk_get_prop(ctx, obj_index); \
 		size_t array_length = duk_gl_determine_array_length(ctx, obj_index, sz, num); \
 		unsigned int i = 0; \
 		for(i=0; i<array_length; i++) \
@@ -125,12 +128,13 @@ static size_t duk_gl_get_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_i
 			array[i] = (argtypedef1)duk_get_##arg1(ctx, -1); \
 			duk_pop(ctx); \
 		} \
-		duk_pop(ctx); \
-		return array_length; \
+		return array; \
 	} \
-	return 0; \
-} \
-static size_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \
+	return NULL; \
+}
+
+#define DUK_GL_ARRAY_PUT_FUNCTION(argtypedef1, arg1) \
+DUK_LOCAL duk_bool_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_index, duk_size_t sz, argtypedef1 *array, size_t num) \
 { \
 	if (duk_is_array(ctx, obj_index)) \
 	{ \
@@ -143,16 +147,28 @@ static size_t duk_gl_put_##argtypedef1##_array(duk_context *ctx, duk_idx_t obj_i
 			duk_put_prop_index(ctx, obj_index, (duk_uarridx_t)i); \
 		} \
 		duk_pop(ctx); \
-		return array_length; \
+		return 1; \
 	} \
 	return 0; \
 }
 
-DUK_GL_ARRAY_PROCESSING_FUNCTION(GLbyte, number)
-DUK_GL_ARRAY_PROCESSING_FUNCTION(GLdouble, number)
-DUK_GL_ARRAY_PROCESSING_FUNCTION(GLfloat, number)
-DUK_GL_ARRAY_PROCESSING_FUNCTION(GLint, number)
-DUK_GL_ARRAY_PROCESSING_FUNCTION(GLshort, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLboolean, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLboolean, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLbyte, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLubyte, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLubyte, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLdouble, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLdouble, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLfloat, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLfloat, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLclampf, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLint, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLint, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLuint, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLuint, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLshort, number)
+DUK_GL_ARRAY_GET_FUNCTION(GLushort, number)
+DUK_GL_ARRAY_PUT_FUNCTION(GLushort, number)
 
 /*
  *  Wrapper macros for OpenGL C functions.
@@ -160,499 +176,563 @@ DUK_GL_ARRAY_PROCESSING_FUNCTION(GLshort, number)
  *  Macros take arguments in following manner (<Function name>, <OpenGL variable type 1>, <Duktape push type 1>, ...N)
  *  - Function name = OpenGL C function name
  *  - OpenGL variable type N = OpenGL's C variable type definition, for example, "GLenum"
- *  - Duktape push type 1 = Duktape API's duk_to_... function's type name, for example, duk_to_number
+ *  - Duktape push type 1 = Duktape API's duk_get_... function's type name, for example, duk_get_number
  */
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(c_function_name) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(PREPROCESS, POSTPROCESS, c_function_name) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name(); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(c_function_name, rettypedef1) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name()); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(c_function_name, argtypedef1, arg1) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0) \
+		(argtypedef1)arg1 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(c_function_name, rettypedef1, argtypedef1, arg1) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0) \
+		(argtypedef1)arg1 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(c_function_name, argtypedef1, arg1, argtypedef2, arg2) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG6(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG6(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG7(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG7(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG8(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG8(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG9(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG9(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG10(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG10(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG11(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG11(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG12(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG12(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11),  \
-		(argtypedef13)duk_to_##arg13(ctx, 12) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12,  \
+		(argtypedef13)arg13 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG13(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG13(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11),  \
-		(argtypedef13)duk_to_##arg13(ctx, 12) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12,  \
+		(argtypedef13)arg13 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG14(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG14(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11),  \
-		(argtypedef13)duk_to_##arg13(ctx, 12),  \
-		(argtypedef14)duk_to_##arg14(ctx, 13) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12,  \
+		(argtypedef13)arg13,  \
+		(argtypedef14)arg14 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG14(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG14(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11),  \
-		(argtypedef13)duk_to_##arg13(ctx, 12),  \
-		(argtypedef14)duk_to_##arg14(ctx, 13) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12,  \
+		(argtypedef13)arg13,  \
+		(argtypedef14)arg14 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14, argtypedef15, arg15) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(PREPROCESS, POSTPROCESS, c_function_name, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14, argtypedef15, arg15) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11),  \
-		(argtypedef13)duk_to_##arg13(ctx, 12),  \
-		(argtypedef14)duk_to_##arg14(ctx, 13),  \
-		(argtypedef15)duk_to_##arg15(ctx, 14) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12,  \
+		(argtypedef13)arg13,  \
+		(argtypedef14)arg14,  \
+		(argtypedef15)arg15 \
 	); \
+	POSTPROCESS; \
 	return 0; \
 }
 
-#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG15(c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14, argtypedef15, arg15) \
+#define DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG15(PREPROCESS, POSTPROCESS, c_function_name, rettypedef1, argtypedef1, arg1, argtypedef2, arg2, argtypedef3, arg3, argtypedef4, arg4, argtypedef5, arg5, argtypedef6, arg6, argtypedef7, arg7, argtypedef8, arg8, argtypedef9, arg9, argtypedef10, arg10, argtypedef11, arg11, argtypedef12, arg12, argtypedef13, arg13, argtypedef14, arg14, argtypedef15, arg15) \
 DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
 { \
+	PREPROCESS; \
 	duk_push_##rettypedef1(ctx, c_function_name( \
-		(argtypedef1)duk_to_##arg1(ctx, 0),  \
-		(argtypedef2)duk_to_##arg2(ctx, 1),  \
-		(argtypedef3)duk_to_##arg3(ctx, 2),  \
-		(argtypedef4)duk_to_##arg4(ctx, 3),  \
-		(argtypedef5)duk_to_##arg5(ctx, 4),  \
-		(argtypedef6)duk_to_##arg6(ctx, 5),  \
-		(argtypedef7)duk_to_##arg7(ctx, 6),  \
-		(argtypedef8)duk_to_##arg8(ctx, 7),  \
-		(argtypedef9)duk_to_##arg9(ctx, 8),  \
-		(argtypedef10)duk_to_##arg10(ctx, 9),  \
-		(argtypedef11)duk_to_##arg11(ctx, 10),  \
-		(argtypedef12)duk_to_##arg12(ctx, 11),  \
-		(argtypedef13)duk_to_##arg13(ctx, 12),  \
-		(argtypedef14)duk_to_##arg14(ctx, 13),  \
-		(argtypedef15)duk_to_##arg15(ctx, 14) \
+		(argtypedef1)arg1,  \
+		(argtypedef2)arg2,  \
+		(argtypedef3)arg3,  \
+		(argtypedef4)arg4,  \
+		(argtypedef5)arg5,  \
+		(argtypedef6)arg6,  \
+		(argtypedef7)arg7,  \
+		(argtypedef8)arg8,  \
+		(argtypedef9)arg9,  \
+		(argtypedef10)arg10,  \
+		(argtypedef11)arg11,  \
+		(argtypedef12)arg12,  \
+		(argtypedef13)arg13,  \
+		(argtypedef14)arg14,  \
+		(argtypedef15)arg15 \
 	)); \
+	POSTPROCESS; \
 	return 1; \
 }
 
@@ -660,1358 +740,2608 @@ DUK_LOCAL duk_ret_t duk_gl_##c_function_name(duk_context *ctx) \
  *  OpenGL wrapper function definitions
  */
 #ifdef DUK_GL_ARB
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveTextureARB, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBeginQueryARB, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindBufferARB, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindProgramARB, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendEquationSeparateiARB, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationiARB, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glBlendFuncSeparateiARB, GLuint, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendFunciARB, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glClampColorARB, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveTextureARB, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCurrentPaletteMatrixARB, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glDebugMessageInsertARB, GLenum, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDeleteNamedStringARB, GLint, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableVertexAttribArrayARB, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glDispatchComputeGroupSizeARB, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawArraysInstancedARB, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableVertexAttribArrayARB, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEndQueryARB, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEvaluateDepthValuesARB)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glFramebufferTextureARB, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTextureFaceARB, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTextureLayerARB, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(glGetGraphicsResetStatusARB, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(glGetImageHandleARB, uint, GLuint, uint, GLint, int, GLboolean, boolean, GLint, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGetTextureHandleARB, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetTextureSamplerHandleARB, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsBufferARB, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsImageHandleResidentARB, boolean, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsNamedStringARB, boolean, GLint, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsProgramARB, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsQueryARB, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTextureHandleResidentARB, boolean, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeImageHandleNonResidentARB, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMakeImageHandleResidentARB, GLuint64, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeTextureHandleNonResidentARB, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeTextureHandleResidentARB, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMaxShaderCompilerThreadsARB, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMinSampleShadingARB, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1dARB, GLenum, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1fARB, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1iARB, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1sARB, GLenum, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2dARB, GLenum, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2fARB, GLenum, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2iARB, GLenum, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2sARB, GLenum, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3dARB, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3fARB, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3iARB, GLenum, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3sARB, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4dARB, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4fARB, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4iARB, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4sARB, GLenum, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPointParameterfARB, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glPrimitiveBoundingBoxARB, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramEnvParameter4dARB, GLenum, uint, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramEnvParameter4fARB, GLenum, uint, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramLocalParameter4dARB, GLenum, uint, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramLocalParameter4fARB, GLenum, uint, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramParameteriARB, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1i64ARB, GLuint, uint, GLint, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1ui64ARB, GLuint, uint, GLint, int, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2i64ARB, GLuint, uint, GLint, int, GLint64, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2ui64ARB, GLuint, uint, GLint, int, GLuint64, uint, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3i64ARB, GLuint, uint, GLint, int, GLint64, int, GLint64, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3ui64ARB, GLuint, uint, GLint, int, GLuint64, uint, GLuint64, uint, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4i64ARB, GLuint, uint, GLint, int, GLint64, int, GLint64, int, GLint64, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4ui64ARB, GLuint, uint, GLint, int, GLuint64, uint, GLuint64, uint, GLuint64, uint, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniformHandleui64ARB, GLuint, uint, GLint, int, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleCoverageARB, GLfloat, number, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexBufferARB, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glTexPageCommitmentARB, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1fARB, GLint, int, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1i64ARB, GLint, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1iARB, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1ui64ARB, GLint, int, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2fARB, GLint, int, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2i64ARB, GLint, int, GLint64, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2iARB, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2ui64ARB, GLint, int, GLuint64, uint, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3fARB, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3i64ARB, GLint, int, GLint64, int, GLint64, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3iARB, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3ui64ARB, GLint, int, GLuint64, uint, GLuint64, uint, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4fARB, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4i64ARB, GLint, int, GLint64, int, GLint64, int, GLint64, int, GLint64, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4iARB, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4ui64ARB, GLint, int, GLuint64, uint, GLuint64, uint, GLuint64, uint, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniformHandleui64ARB, GLint, int, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glUnmapBufferARB, boolean, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1dARB, GLuint, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1fARB, GLuint, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1sARB, GLuint, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2dARB, GLuint, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2fARB, GLuint, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2sARB, GLuint, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3dARB, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3fARB, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3sARB, GLuint, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4NubARB, GLuint, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4dARB, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4fARB, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4sARB, GLuint, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribDivisorARB, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribL1ui64ARB, GLuint, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glVertexBlendARB, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2dARB, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2fARB, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2iARB, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2sARB, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3dARB, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3fARB, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3iARB, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3sARB, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glAccumxOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glActiveTextureARB, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glAlphaFuncxOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginPerfMonitorAMD, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBeginQueryARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindBufferARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindProgramARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBindVertexArrayAPPLE, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var0 = duk_get_int(ctx, 0); GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var6 [0]; ,/*EMPTY*/,glBitmapxOES, GLsizei, var0, GLsizei, var1, GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3), GLfixed, duk_get_int(ctx, 4), GLfixed, duk_get_int(ctx, 5), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glBlendBarrierKHR)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendColorxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendEquationIndexedAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBlendEquationSeparateIndexedAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBlendEquationSeparateiARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendEquationiARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBlendFuncIndexedAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glBlendFuncSeparateIndexedAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glBlendFuncSeparateiARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBlendFunciARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBufferParameteriAPPLE, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glClampColorARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearAccumxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearColorxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearDepthfOES, GLclampf, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearDepthxOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClientActiveTextureARB, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glClipPlanefOES, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glClipPlanexOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glColor3xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glColor4xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glColorTableParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glColorTableParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLint var3 [0]; ,/*EMPTY*/,glCompileShaderIncludeARB, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLchar * const *, duk_get_string(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameterf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glConvolutionParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameteri, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glConvolutionParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameterxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glConvolutionParameterxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyColorSubTable, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyColorTable, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyConvolutionFilter1D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyConvolutionFilter2D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCurrentPaletteMatrixARB, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var3 = duk_get_int(ctx, 3);  GLuint var4 [0]; ,/*EMPTY*/,glDebugMessageControlARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3, const GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0), GLboolean, duk_get_boolean(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [0]; ,/*EMPTY*/,glDebugMessageEnableAMD, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0), GLboolean, duk_get_boolean(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDebugMessageInsertAMD, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLchar *, duk_get_string(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glDebugMessageInsertARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLsizei, var4, const GLchar *, duk_get_string(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteBuffersARB, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteFencesAPPLE, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDeleteNamedStringARB, GLint, duk_get_int(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [0]; ,/*EMPTY*/,glDeleteNamesAMD, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glDeletePerfMonitorsAMD, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteProgramsARB, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteQueriesARB, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteVertexArraysAPPLE, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthRangefOES, GLclampf, duk_get_number(ctx, 0), GLclampf, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthRangexOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableVertexAttribAPPLE, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDisableVertexAttribArrayARB, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glDispatchComputeGroupSizeARB, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawArraysInstancedARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLenum var1 [0]; ,/*EMPTY*/,glDrawBuffersARB, GLsizei, var0, const GLenum *, duk_gl_get_GLenum_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glDrawElementArrayAPPLE, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glDrawRangeElementArrayAPPLE, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableVertexAttribAPPLE, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEnableVertexAttribArrayARB, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEndPerfMonitorAMD, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEndQueryARB, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEvalCoord1xOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glEvalCoord1xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEvalCoord2xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glEvalCoord2xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEvaluateDepthValuesARB)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLfixed var2 [0]; ,/*EMPTY*/,glFeedbackBufferxOES, GLsizei, var0, GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFinishFenceAPPLE, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFinishObjectAPPLE, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFogxOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glFogxvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [1]; ,/*EMPTY*/,glFramebufferSampleLocationsfvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureFaceARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureLayerARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glFrustumfOES, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glFrustumxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3), GLfixed, duk_get_int(ctx, 4), GLfixed, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenBuffersARB, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenFencesAPPLE, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [0]; ,duk_gl_put_GLuint_array(ctx, 2, 0, var2, 0); ,glGenNamesAMD, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenPerfMonitorsAMD, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenProgramsARB, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenQueriesARB, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenVertexArraysAPPLE, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetBufferParameterivARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetClipPlanefOES, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfixed var1 [0]; ,duk_gl_put_GLfixed_array(ctx, 1, 0, var1, 0); ,glGetClipPlanexOES, GLenum, duk_get_uint(ctx, 0), GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetConvolutionParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetConvolutionParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetConvolutionParameterxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var5 = duk_get_DETERMINE(ctx, 5); GLenum var2 [0]; GLuint var3 [0]; GLuint var4 [0]; GLsizei var5 [0]; GLchar var6 [0]; ,duk_gl_put_GLenum_array(ctx, 2, 0, var2, 0); duk_gl_put_GLuint_array(ctx, 3, 0, var3, 0); duk_gl_put_GLuint_array(ctx, 4, 0, var4, 0); duk_gl_put_GLsizei_array(ctx, 5, 0, var5, 0); duk_gl_put_GLchar_array(ctx, 6, 0, var6, 0); ,glGetDebugMessageLogAMD, uint, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0), GLsizei *, duk_gl_get_GLsizei_array(ctx, 5, 0, var5, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG8(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var6 = duk_get_DETERMINE(ctx, 6); GLenum var2 [0]; GLenum var3 [0]; GLuint var4 [0]; GLenum var5 [0]; GLsizei var6 [0]; GLchar var7 [0]; ,duk_gl_put_GLenum_array(ctx, 2, 0, var2, 0); duk_gl_put_GLenum_array(ctx, 3, 0, var3, 0); duk_gl_put_GLuint_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLsizei_array(ctx, 6, 0, var6, 0); duk_gl_put_GLchar_array(ctx, 7, 0, var7, 0); ,glGetDebugMessageLogARB, uint, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 3, 0, var3, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLsizei *, duk_gl_get_GLsizei_array(ctx, 6, 0, var6, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 7, 0, var7, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfixed var1 [0]; ,duk_gl_put_GLfixed_array(ctx, 1, 0, var1, 0); ,glGetFixedvOES, GLenum, duk_get_uint(ctx, 0), GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(/*EMPTY*/,/*EMPTY*/,glGetGraphicsResetStatusARB, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetHistogramParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetHistogramParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetHistogramParameterxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(/*EMPTY*/,/*EMPTY*/,glGetImageHandleARB, uint, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLint, duk_get_int(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetLightxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetMapxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glGetMaterialxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMinmaxParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetMinmaxParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLint var3 [0]; GLchar var4 [0]; ,duk_gl_put_GLint_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 4, 0, var4, 0); ,glGetNamedStringARB, GLint, duk_get_int(ctx, 0), const GLchar *, duk_get_string(ctx, 1), GLsizei, var2, GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetNamedStringivARB, GLint, duk_get_int(ctx, 0), const GLchar *, duk_get_string(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [0]; ,duk_gl_put_GLint_array(ctx, 3, 0, var3, 0); ,glGetObjectParameterivAPPLE, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLuint var3 [0]; GLint var4 [0]; ,duk_gl_put_GLuint_array(ctx, 3, 0, var3, 0); duk_gl_put_GLint_array(ctx, 4, 0, var4, 0); ,glGetPerfMonitorCounterDataAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0), GLint *, duk_gl_get_GLint_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLchar var4 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 4, 0, var4, 0); ,glGetPerfMonitorCounterStringAMD, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3); GLint var1 [0]; GLint var2 [0]; GLuint var4 [0]; ,duk_gl_put_GLint_array(ctx, 1, 0, var1, 0); duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); duk_gl_put_GLuint_array(ctx, 4, 0, var4, 0); ,glGetPerfMonitorCountersAMD, GLuint, duk_get_uint(ctx, 0), GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0), GLsizei, var3, GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var2 [0]; GLchar var3 [0]; ,duk_gl_put_GLsizei_array(ctx, 2, 0, var2, 0); duk_gl_put_GLchar_array(ctx, 3, 0, var3, 0); ,glGetPerfMonitorGroupStringAMD, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLint var0 [0]; GLuint var2 [0]; ,duk_gl_put_GLint_array(ctx, 0, 0, var0, 0); duk_gl_put_GLuint_array(ctx, 2, 0, var2, 0); ,glGetPerfMonitorGroupsAMD, GLint *, duk_gl_get_GLint_array(ctx, 0, 0, var0, 0), GLsizei, var1, GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetPixelMapxv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetProgramEnvParameterdvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetProgramEnvParameterfvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetProgramLocalParameterdvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetProgramLocalParameterfvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetProgramivARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetQueryObjectivARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetQueryObjectuivARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetQueryivARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetTexEnvxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetTexGenxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfixed var3 [0]; ,duk_gl_put_GLfixed_array(ctx, 3, 0, var3, 0); ,glGetTexLevelParameterxvOES, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfixed *, duk_gl_get_GLfixed_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfixed var2 [0]; ,duk_gl_put_GLfixed_array(ctx, 2, 0, var2, 0); ,glGetTexParameterxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glGetTextureHandleARB, uint, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetTextureSamplerHandleARB, uint, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64 var2 [0]; ,duk_gl_put_GLint64_array(ctx, 2, 0, var2, 0); ,glGetUniformi64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64 var2 [0]; ,duk_gl_put_GLuint64_array(ctx, 2, 0, var2, 0); ,glGetUniformui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetVertexAttribLui64vARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribdvARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribfvARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribivARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetnMapdvARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetnMapfvARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetnMapivARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetnPixelMapfvARB, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetnPixelMapuivARB, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLushort var2 [1]; ,duk_gl_put_GLushort_array(ctx, 2, 1, var2, 1); ,glGetnPixelMapusvARB, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLushort *, duk_gl_get_GLushort_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLubyte var1 [0]; ,duk_gl_put_GLubyte_array(ctx, 1, 0, var1, 0); ,glGetnPolygonStippleARB, GLsizei, var0, GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetnUniformdvARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetnUniformfvARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLint64 var3 [0]; ,duk_gl_put_GLint64_array(ctx, 3, 0, var3, 0); ,glGetnUniformi64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetnUniformivARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLuint64 var3 [0]; ,duk_gl_put_GLuint64_array(ctx, 3, 0, var3, 0); ,glGetnUniformui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLuint var3 [1]; ,duk_gl_put_GLuint_array(ctx, 3, 1, var3, 1); ,glGetnUniformuivARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glHistogram, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLboolean, duk_get_boolean(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexxOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glIndexxvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsBufferARB, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsFenceAPPLE, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsImageHandleResidentARB, boolean, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glIsNameAMD, boolean, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glIsNamedStringARB, boolean, GLint, duk_get_int(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsProgramARB, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsQueryARB, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsTextureHandleResidentARB, boolean, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsVertexArrayAPPLE, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glIsVertexAttribEnabledAPPLE, boolean, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glLightModelxOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glLightModelxvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glLightxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glLightxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glLineWidthxOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glLoadMatrixxOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glLoadTransposeMatrixdARB, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [0]; ,/*EMPTY*/,glLoadTransposeMatrixfARB, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glLoadTransposeMatrixxOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeImageHandleNonResidentARB, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMakeImageHandleResidentARB, GLuint64, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeTextureHandleNonResidentARB, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeTextureHandleResidentARB, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glMap1xOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLfixed, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(/*EMPTY*/,/*EMPTY*/,glMap2xOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLfixed, duk_get_int(ctx, 5), GLfixed, duk_get_int(ctx, 6), GLint, duk_get_int(ctx, 7), GLint, duk_get_int(ctx, 8), GLfixed, duk_get_int(ctx, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMapGrid1xOES, GLint, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMapGrid2xOES, GLint, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3), GLfixed, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7( GLdouble var6 [0]; ,/*EMPTY*/,glMapVertexAttrib1dAPPLE, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7( GLfloat var6 [0]; ,/*EMPTY*/,glMapVertexAttrib1fAPPLE, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11( GLdouble var10 [0]; ,/*EMPTY*/,glMapVertexAttrib2dAPPLE, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLdouble, duk_get_number(ctx, 6), GLdouble, duk_get_number(ctx, 7), GLint, duk_get_int(ctx, 8), GLint, duk_get_int(ctx, 9), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 10, 0, var10, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11( GLfloat var10 [0]; ,/*EMPTY*/,glMapVertexAttrib2fAPPLE, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLint, duk_get_int(ctx, 8), GLint, duk_get_int(ctx, 9), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 10, 0, var10, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMaterialxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glMaterialxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [1]; ,/*EMPTY*/,glMatrixIndexubvARB, GLint, duk_get_int(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glMatrixIndexuivARB, GLint, duk_get_int(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [1]; ,/*EMPTY*/,glMatrixIndexusvARB, GLint, duk_get_int(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMaxShaderCompilerThreadsARB, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMinSampleShadingARB, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMinmax, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glMultMatrixxOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glMultTransposeMatrixdARB, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [0]; ,/*EMPTY*/,glMultTransposeMatrixfARB, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glMultTransposeMatrixxOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3);  GLint var1 [0];  GLsizei var2 [0]; ,/*EMPTY*/,glMultiDrawElementArrayAPPLE, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5);  GLint var3 [0];  GLsizei var4 [0]; ,/*EMPTY*/,glMultiDrawRangeElementArrayAPPLE, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1bOES, GLenum, duk_get_uint(ctx, 0), GLbyte, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glMultiTexCoord1bvOES, GLenum, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1dARB, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glMultiTexCoord1dvARB, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1fARB, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glMultiTexCoord1fvARB, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1iARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glMultiTexCoord1ivARB, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1sARB, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glMultiTexCoord1svARB, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1xOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glMultiTexCoord1xvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2bOES, GLenum, duk_get_uint(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glMultiTexCoord2bvOES, GLenum, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2dARB, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glMultiTexCoord2dvARB, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2fARB, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [2]; ,/*EMPTY*/,glMultiTexCoord2fvARB, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2iARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [2]; ,/*EMPTY*/,glMultiTexCoord2ivARB, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2sARB, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [2]; ,/*EMPTY*/,glMultiTexCoord2svARB, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2xOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glMultiTexCoord2xvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3bOES, GLenum, duk_get_uint(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2), GLbyte, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glMultiTexCoord3bvOES, GLenum, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3dARB, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glMultiTexCoord3dvARB, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3fARB, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glMultiTexCoord3fvARB, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3iARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [3]; ,/*EMPTY*/,glMultiTexCoord3ivARB, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3sARB, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glMultiTexCoord3svARB, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3xOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glMultiTexCoord3xvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4bOES, GLenum, duk_get_uint(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2), GLbyte, duk_get_int(ctx, 3), GLbyte, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glMultiTexCoord4bvOES, GLenum, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4dARB, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glMultiTexCoord4dvARB, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4fARB, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [4]; ,/*EMPTY*/,glMultiTexCoord4fvARB, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4iARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glMultiTexCoord4ivARB, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4sARB, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3), GLshort, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glMultiTexCoord4svARB, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4xOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3), GLfixed, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glMultiTexCoord4xvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [1]; ,/*EMPTY*/,glNamedFramebufferSampleLocationsfvARB, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glNamedStringARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), const GLchar *, duk_get_string(ctx, 2), GLint, duk_get_int(ctx, 3), const GLchar *, duk_get_string(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glNormal3xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glObjectPurgeableAPPLE, uint, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glObjectUnpurgeableAPPLE, uint, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glOrthofOES, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glOrthoxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3), GLfixed, duk_get_int(ctx, 4), GLfixed, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPassThroughxOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glPixelMapx, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelStorex, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelTransferxOES, GLenum, duk_get_uint(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelZoomxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPointParameterfARB, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glPointParameterfvARB, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var1 [0]; ,/*EMPTY*/,glPointParameterxvOES, GLenum, duk_get_uint(ctx, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPointSizexOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPolygonOffsetxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(/*EMPTY*/,/*EMPTY*/,glPrimitiveBoundingBoxARB, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0];  GLfixed var2 [0]; ,/*EMPTY*/,glPrioritizeTexturesxOES, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramEnvParameter4dARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLdouble var2 [4]; ,/*EMPTY*/,glProgramEnvParameter4dvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramEnvParameter4fARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [4]; ,/*EMPTY*/,glProgramEnvParameter4fvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramLocalParameter4dARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLdouble var2 [4]; ,/*EMPTY*/,glProgramLocalParameter4dvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramLocalParameter4fARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [4]; ,/*EMPTY*/,glProgramLocalParameter4fvARB, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramParameteriARB, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1i64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64 var3 [0]; ,/*EMPTY*/,glProgramUniform1i64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1ui64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64 var3 [0]; ,/*EMPTY*/,glProgramUniform1ui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2i64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2), GLint64, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64 var3 [0]; ,/*EMPTY*/,glProgramUniform2i64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2ui64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64, duk_get_uint(ctx, 2), GLuint64, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64 var3 [0]; ,/*EMPTY*/,glProgramUniform2ui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3i64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2), GLint64, duk_get_int(ctx, 3), GLint64, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64 var3 [0]; ,/*EMPTY*/,glProgramUniform3i64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3ui64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64, duk_get_uint(ctx, 2), GLuint64, duk_get_uint(ctx, 3), GLuint64, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64 var3 [0]; ,/*EMPTY*/,glProgramUniform3ui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4i64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2), GLint64, duk_get_int(ctx, 3), GLint64, duk_get_int(ctx, 4), GLint64, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64 var3 [0]; ,/*EMPTY*/,glProgramUniform4i64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4ui64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64, duk_get_uint(ctx, 2), GLuint64, duk_get_uint(ctx, 3), GLuint64, duk_get_uint(ctx, 4), GLuint64, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64 var3 [0]; ,/*EMPTY*/,glProgramUniform4ui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniformHandleui64ARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64 var3 [0]; ,/*EMPTY*/,glProgramUniformHandleui64vARB, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(GLfixed var0 [0]; GLint var1 [0]; ,duk_gl_put_GLfixed_array(ctx, 0, 0, var0, 0); duk_gl_put_GLint_array(ctx, 1, 0, var1, 0); ,glQueryMatrixxOES, uint, GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0), GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glQueryObjectParameteruiAMD, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glRasterPos2xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glRasterPos2xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glRasterPos3xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glRasterPos3xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRasterPos4xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glRasterPos4xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRectxOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfixed var0 [0];  GLfixed var1 [0]; ,/*EMPTY*/,glRectxvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glResetHistogram, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glResetMinmax, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRotatexOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSampleCoverageARB, GLfloat, duk_get_number(ctx, 0), GLboolean, duk_get_boolean(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glScalexOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLuint var4 [0]; ,duk_gl_put_GLuint_array(ctx, 4, 0, var4, 0); ,glSelectPerfMonitorCountersAMD, GLuint, duk_get_uint(ctx, 0), GLboolean, duk_get_boolean(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glSetFenceAPPLE, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [0]; ,/*EMPTY*/,glSetMultisamplefvAMD, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glStencilOpValueAMD, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTbufferMask3DFX, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTessellationFactorAMD, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTessellationModeAMD, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glTestFenceAPPLE, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glTestObjectAPPLE, boolean, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexBufferARB, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1bOES, GLbyte, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glTexCoord1bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1xOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glTexCoord1xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2bOES, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glTexCoord2bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glTexCoord2xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3bOES, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glTexCoord3bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glTexCoord3xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4bOES, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2), GLbyte, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glTexCoord4bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2), GLfixed, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glTexCoord4xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexEnvxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glTexEnvxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexGenxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glTexGenxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glTexPageCommitmentARB, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLsizei, var7, GLboolean, duk_get_boolean(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexParameterxOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfixed var2 [0]; ,/*EMPTY*/,glTexParameterxvOES, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfixed *, duk_gl_get_GLfixed_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTexStorageSparseAMD, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3, GLsizei, var4, GLsizei, var5, GLbitfield, duk_get_uint(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glTextureStorageSparseAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLsizei, var5, GLsizei, var6, GLbitfield, duk_get_uint(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTranslatexOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1fARB, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [1]; ,/*EMPTY*/,glUniform1fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1i64ARB, GLint, duk_get_int(ctx, 0), GLint64, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64 var2 [0]; ,/*EMPTY*/,glUniform1i64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1iARB, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [1]; ,/*EMPTY*/,glUniform1ivARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1ui64ARB, GLint, duk_get_int(ctx, 0), GLuint64, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64 var2 [0]; ,/*EMPTY*/,glUniform1ui64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2fARB, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [2]; ,/*EMPTY*/,glUniform2fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2i64ARB, GLint, duk_get_int(ctx, 0), GLint64, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64 var2 [0]; ,/*EMPTY*/,glUniform2i64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2iARB, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [2]; ,/*EMPTY*/,glUniform2ivARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2ui64ARB, GLint, duk_get_int(ctx, 0), GLuint64, duk_get_uint(ctx, 1), GLuint64, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64 var2 [0]; ,/*EMPTY*/,glUniform2ui64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3fARB, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [3]; ,/*EMPTY*/,glUniform3fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3i64ARB, GLint, duk_get_int(ctx, 0), GLint64, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2), GLint64, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64 var2 [0]; ,/*EMPTY*/,glUniform3i64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3iARB, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [3]; ,/*EMPTY*/,glUniform3ivARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3ui64ARB, GLint, duk_get_int(ctx, 0), GLuint64, duk_get_uint(ctx, 1), GLuint64, duk_get_uint(ctx, 2), GLuint64, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64 var2 [0]; ,/*EMPTY*/,glUniform3ui64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4fARB, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [4]; ,/*EMPTY*/,glUniform4fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4i64ARB, GLint, duk_get_int(ctx, 0), GLint64, duk_get_int(ctx, 1), GLint64, duk_get_int(ctx, 2), GLint64, duk_get_int(ctx, 3), GLint64, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64 var2 [0]; ,/*EMPTY*/,glUniform4i64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4iARB, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [4]; ,/*EMPTY*/,glUniform4ivARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4ui64ARB, GLint, duk_get_int(ctx, 0), GLuint64, duk_get_uint(ctx, 1), GLuint64, duk_get_uint(ctx, 2), GLuint64, duk_get_uint(ctx, 3), GLuint64, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64 var2 [0]; ,/*EMPTY*/,glUniform4ui64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniformHandleui64ARB, GLint, duk_get_int(ctx, 0), GLuint64, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64 var2 [0]; ,/*EMPTY*/,glUniformHandleui64vARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [4]; ,/*EMPTY*/,glUniformMatrix2fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [9]; ,/*EMPTY*/,glUniformMatrix3fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 9, var3, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [16]; ,/*EMPTY*/,glUniformMatrix4fvARB, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 16, var3, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glUnmapBufferARB, boolean, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex2bOES, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glVertex2bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glVertex2xOES, GLfixed, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glVertex2xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex3bOES, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glVertex3bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex3xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glVertex3xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertex4bOES, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2), GLbyte, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glVertex4bvOES, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex4xOES, GLfixed, duk_get_int(ctx, 0), GLfixed, duk_get_int(ctx, 1), GLfixed, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfixed var0 [0]; ,/*EMPTY*/,glVertex4xvOES, const GLfixed *, duk_gl_get_GLfixed_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexArrayParameteriAPPLE, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1dARB, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVertexAttrib1dvARB, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1fARB, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glVertexAttrib1fvARB, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1sARB, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVertexAttrib1svARB, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2dARB, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glVertexAttrib2dvARB, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2fARB, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [2]; ,/*EMPTY*/,glVertexAttrib2fvARB, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2sARB, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [2]; ,/*EMPTY*/,glVertexAttrib2svARB, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3dARB, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glVertexAttrib3dvARB, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3fARB, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glVertexAttrib3fvARB, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3sARB, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glVertexAttrib3svARB, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVertexAttrib4NbvARB, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glVertexAttrib4NivARB, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVertexAttrib4NsvARB, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4NubARB, GLuint, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLubyte, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [1]; ,/*EMPTY*/,glVertexAttrib4NubvARB, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glVertexAttrib4NuivARB, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [1]; ,/*EMPTY*/,glVertexAttrib4NusvARB, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVertexAttrib4bvARB, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4dARB, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glVertexAttrib4dvARB, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4fARB, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [4]; ,/*EMPTY*/,glVertexAttrib4fvARB, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glVertexAttrib4ivARB, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4sARB, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3), GLshort, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glVertexAttrib4svARB, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [4]; ,/*EMPTY*/,glVertexAttrib4ubvARB, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glVertexAttrib4uivARB, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [4]; ,/*EMPTY*/,glVertexAttrib4usvARB, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribDivisorARB, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribL1ui64ARB, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL1ui64vARB, GLuint, duk_get_uint(ctx, 0), const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribParameteriAMD, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glVertexBlendARB, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glWeightbvARB, GLint, duk_get_int(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glWeightdvARB, GLint, duk_get_int(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glWeightfvARB, GLint, duk_get_int(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glWeightivARB, GLint, duk_get_int(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glWeightsvARB, GLint, duk_get_int(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [1]; ,/*EMPTY*/,glWeightubvARB, GLint, duk_get_int(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glWeightuivARB, GLint, duk_get_int(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [1]; ,/*EMPTY*/,glWeightusvARB, GLint, duk_get_int(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2dARB, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glWindowPos2dvARB, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2fARB, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glWindowPos2fvARB, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2iARB, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [2]; ,/*EMPTY*/,glWindowPos2ivARB, const GLint *, duk_gl_get_GLint_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2sARB, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [2]; ,/*EMPTY*/,glWindowPos2svARB, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3dARB, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glWindowPos3dvARB, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3fARB, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glWindowPos3fvARB, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3iARB, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glWindowPos3ivARB, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3sARB, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glWindowPos3svARB, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
 #endif /* DUK_GL_ARB */
 
 #ifdef DUK_GL_ATI
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glAlphaFragmentOp1ATI, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glAlphaFragmentOp2ATI, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(glAlphaFragmentOp3ATI, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glArrayObjectATI, GLenum, uint, GLint, int, GLenum, uint, GLsizei, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glBeginFragmentShaderATI)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBindFragmentShaderATI, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationSeparateATI, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveVertexStreamATI, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glColorFragmentOp1ATI, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glColorFragmentOp2ATI, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(glColorFragmentOp3ATI, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeleteFragmentShaderATI, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDrawElementArrayATI, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawRangeElementArrayATI, GLenum, uint, GLuint, uint, GLuint, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndFragmentShaderATI)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFreeObjectBufferATI, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGenFragmentShadersATI, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsObjectBufferATI, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNormalStream3bATI, GLenum, uint, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNormalStream3dATI, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNormalStream3fATI, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNormalStream3iATI, GLenum, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNormalStream3sATI, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPNTrianglesfATI, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPNTrianglesiATI, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPassTexCoordATI, GLuint, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSampleMapATI, GLuint, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glStencilFuncSeparateATI, GLenum, uint, GLenum, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glStencilOpSeparateATI, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glUnmapObjectBufferATI, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVariantArrayObjectATI, GLuint, uint, GLenum, uint, GLsizei, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glVertexAttribArrayObjectATI, GLuint, uint, GLint, int, GLenum, uint, GLboolean, boolean, GLsizei, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexBlendEnvfATI, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexBlendEnviATI, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexStream1dATI, GLenum, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexStream1fATI, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexStream1iATI, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexStream1sATI, GLenum, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexStream2dATI, GLenum, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexStream2fATI, GLenum, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexStream2iATI, GLenum, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexStream2sATI, GLenum, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexStream3dATI, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexStream3fATI, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexStream3iATI, GLenum, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexStream3sATI, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexStream4dATI, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexStream4fATI, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexStream4iATI, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexStream4sATI, GLenum, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glAlphaFragmentOp1ATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(/*EMPTY*/,/*EMPTY*/,glAlphaFragmentOp2ATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLuint, duk_get_uint(ctx, 7), GLuint, duk_get_uint(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(/*EMPTY*/,/*EMPTY*/,glAlphaFragmentOp3ATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLuint, duk_get_uint(ctx, 7), GLuint, duk_get_uint(ctx, 8), GLuint, duk_get_uint(ctx, 9), GLuint, duk_get_uint(ctx, 10), GLuint, duk_get_uint(ctx, 11))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glArrayObjectATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glBeginFragmentShaderATI)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBindFragmentShaderATI, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendEquationSeparateATI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClientActiveVertexStreamATI, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glColorFragmentOp1ATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(/*EMPTY*/,/*EMPTY*/,glColorFragmentOp2ATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLuint, duk_get_uint(ctx, 7), GLuint, duk_get_uint(ctx, 8), GLuint, duk_get_uint(ctx, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(/*EMPTY*/,/*EMPTY*/,glColorFragmentOp3ATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLuint, duk_get_uint(ctx, 7), GLuint, duk_get_uint(ctx, 8), GLuint, duk_get_uint(ctx, 9), GLuint, duk_get_uint(ctx, 10), GLuint, duk_get_uint(ctx, 11), GLuint, duk_get_uint(ctx, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDeleteFragmentShaderATI, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLenum var1 [0]; ,/*EMPTY*/,glDrawBuffersATI, GLsizei, var0, const GLenum *, duk_gl_get_GLenum_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glDrawElementArrayATI, GLenum, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawRangeElementArrayATI, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndFragmentShaderATI)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFreeObjectBufferATI, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glGenFragmentShadersATI, uint, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetArrayObjectfvATI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetArrayObjectivATI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetObjectBufferfvATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetObjectBufferivATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [1]; ,duk_gl_put_GLfloat_array(ctx, 1, 1, var1, 1); ,glGetTexBumpParameterfvATI, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLint var1 [1]; ,duk_gl_put_GLint_array(ctx, 1, 1, var1, 1); ,glGetTexBumpParameterivATI, GLenum, duk_get_uint(ctx, 0), GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetVariantArrayObjectfvATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVariantArrayObjectivATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribArrayObjectfvATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribArrayObjectivATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsObjectBufferATI, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNormalStream3bATI, GLenum, duk_get_uint(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2), GLbyte, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glNormalStream3bvATI, GLenum, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNormalStream3dATI, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glNormalStream3dvATI, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNormalStream3fATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glNormalStream3fvATI, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNormalStream3iATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [3]; ,/*EMPTY*/,glNormalStream3ivATI, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNormalStream3sATI, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glNormalStream3svATI, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPNTrianglesfATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPNTrianglesiATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPassTexCoordATI, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSampleMapATI, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glSetFragmentShaderConstantATI, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glStencilFuncSeparateATI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glStencilOpSeparateATI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glTexBumpParameterfvATI, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glTexBumpParameterivATI, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glUnmapObjectBufferATI, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glVariantArrayObjectATI, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glVertexAttribArrayObjectATI, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLsizei, var4, GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexBlendEnvfATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexBlendEnviATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexStream1dATI, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVertexStream1dvATI, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexStream1fATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glVertexStream1fvATI, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexStream1iATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glVertexStream1ivATI, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexStream1sATI, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVertexStream1svATI, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexStream2dATI, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glVertexStream2dvATI, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexStream2fATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [2]; ,/*EMPTY*/,glVertexStream2fvATI, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexStream2iATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [2]; ,/*EMPTY*/,glVertexStream2ivATI, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexStream2sATI, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [2]; ,/*EMPTY*/,glVertexStream2svATI, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexStream3dATI, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glVertexStream3dvATI, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexStream3fATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glVertexStream3fvATI, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexStream3iATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [3]; ,/*EMPTY*/,glVertexStream3ivATI, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexStream3sATI, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glVertexStream3svATI, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexStream4dATI, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glVertexStream4dvATI, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexStream4fATI, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [4]; ,/*EMPTY*/,glVertexStream4fvATI, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexStream4iATI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glVertexStream4ivATI, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexStream4sATI, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3), GLshort, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glVertexStream4svATI, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
 #endif /* DUK_GL_ATI */
 
 #ifdef DUK_GL_EXT
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveProgramEXT, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveStencilFaceEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glApplyTextureEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glArrayElementEXT, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginTransformFeedbackEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glBeginVertexShaderEXT)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindBufferBaseEXT, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindFragDataLocationEXT, GLuint, uint, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindFramebufferEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glBindImageTextureEXT, GLuint, uint, GLuint, uint, GLint, int, GLboolean, boolean, GLint, int, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glBindLightParameterEXT, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glBindMaterialParameterEXT, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindMultiTextureEXT, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glBindParameterEXT, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindRenderbufferEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glBindTexGenParameterEXT, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindTextureEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glBindTextureUnitParameterEXT, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBindVertexShaderEXT, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBinormal3bEXT, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBinormal3dEXT, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBinormal3fEXT, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBinormal3iEXT, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBinormal3sEXT, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendColorEXT, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBlendEquationEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationSeparateEXT, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendFuncSeparateEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glBlitFramebufferEXT, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLbitfield, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glCheckFramebufferStatusEXT, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glCheckNamedFramebufferStatusEXT, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearColorIiEXT, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearColorIuiEXT, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientAttribDefaultEXT, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glColorMaskIndexedEXT, GLuint, uint, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameterfEXT, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameteriEXT, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorSubTableEXT, GLenum, uint, GLsizei, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyConvolutionFilter1DEXT, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyConvolutionFilter2DEXT, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyMultiTexImage1DEXT, GLenum, uint, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyMultiTexImage2DEXT, GLenum, uint, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glCopyMultiTexSubImage1DEXT, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyMultiTexSubImage2DEXT, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glCopyMultiTexSubImage3DEXT, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glCopyTexImage1DEXT, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTexImage2DEXT, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyTexSubImage1DEXT, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTexSubImage2DEXT, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTexSubImage3DEXT, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTextureImage1DEXT, GLuint, uint, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTextureImage2DEXT, GLuint, uint, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glCopyTextureSubImage1DEXT, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTextureSubImage2DEXT, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glCopyTextureSubImage3DEXT, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glCreateShaderProgramEXT, uint, GLenum, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeleteVertexShaderEXT, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthBoundsEXT, GLclampd, number, GLclampd, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableClientStateIndexedEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableClientStateiEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableIndexedEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableVariantClientStateEXT, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableVertexArrayAttribEXT, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableVertexArrayEXT, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDrawArraysEXT, GLenum, uint, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawArraysInstancedEXT, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableClientStateIndexedEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableClientStateiEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableIndexedEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableVariantClientStateEXT, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableVertexArrayAttribEXT, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableVertexArrayEXT, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndTransformFeedbackEXT)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndVertexShaderEXT)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glExtractComponentEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFogCoorddEXT, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFogCoordfEXT, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFramebufferDrawBufferEXT, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFramebufferReadBufferEXT, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glFramebufferRenderbufferEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTexture1DEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTexture2DEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFramebufferTexture3DEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glFramebufferTextureEXT, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTextureFaceEXT, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTextureLayerEXT, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(glGenSymbolsEXT, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGenVertexShadersEXT, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGenerateMipmapEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glGenerateMultiTexMipmapEXT, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glGenerateTextureMipmapEXT, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetFragDataLocationEXT, int, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetUniformBufferSizeEXT, int, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glHistogramEXT, GLenum, uint, GLsizei, int, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glIndexFuncEXT, GLenum, uint, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glIndexMaterialEXT, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glInsertComponentEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glInsertEventMarkerEXT, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsEnabledIndexedEXT, boolean, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsFramebufferEXT, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsRenderbufferEXT, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTextureEXT, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsVariantEnabledEXT, boolean, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glLabelObjectEXT, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLockArraysEXT, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glMatrixFrustumEXT, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMatrixLoadIdentityEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glMatrixOrthoEXT, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMatrixPopEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMatrixPushEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMatrixRotatedEXT, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMatrixRotatefEXT, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMatrixScaledEXT, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMatrixScalefEXT, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMatrixTranslatedEXT, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMatrixTranslatefEXT, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMemoryBarrierEXT, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMinmaxEXT, GLenum, uint, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexBufferEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexEnvfEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexEnviEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexGendEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexGenfEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexGeniEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexParameterfEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexParameteriEXT, GLenum, uint, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexRenderbufferEXT, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNamedFramebufferParameteriEXT, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNamedFramebufferRenderbufferEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedFramebufferTexture1DEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedFramebufferTexture2DEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glNamedFramebufferTexture3DEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNamedFramebufferTextureEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedFramebufferTextureFaceEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLint, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedFramebufferTextureLayerEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glNamedProgramLocalParameter4dEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glNamedProgramLocalParameter4fEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glNamedProgramLocalParameterI4iEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glNamedProgramLocalParameterI4uiEXT, GLuint, uint, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNamedRenderbufferStorageEXT, GLuint, uint, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glNamedRenderbufferStorageMultisampleCoverageEXT, GLuint, uint, GLsizei, int, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedRenderbufferStorageMultisampleEXT, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPixelTransformParameterfEXT, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPixelTransformParameteriEXT, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPointParameterfEXT, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPolygonOffsetClampEXT, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPolygonOffsetEXT, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopGroupMarkerEXT)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramParameteriEXT, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1dEXT, GLuint, uint, GLint, int, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1fEXT, GLuint, uint, GLint, int, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1iEXT, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1uiEXT, GLuint, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2dEXT, GLuint, uint, GLint, int, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2fEXT, GLuint, uint, GLint, int, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2iEXT, GLuint, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2uiEXT, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3dEXT, GLuint, uint, GLint, int, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3fEXT, GLuint, uint, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3iEXT, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3uiEXT, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4dEXT, GLuint, uint, GLint, int, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4fEXT, GLuint, uint, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4iEXT, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4uiEXT, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glProvokingVertexEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPushClientAttribDefaultEXT, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPushGroupMarkerEXT, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterSamplesEXT, GLuint, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRenderbufferStorageEXT, GLenum, uint, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glRenderbufferStorageMultisampleEXT, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetHistogramEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetMinmaxEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleMaskEXT, GLclampf, number, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glSamplePatternEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3bEXT, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3dEXT, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3fEXT, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3iEXT, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3sEXT, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3ubEXT, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3uiEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3usEXT, GLushort, uint, GLushort, uint, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glShaderOp1EXT, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glShaderOp2EXT, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glShaderOp3EXT, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glStencilClearTagEXT, GLsizei, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glSwizzleEXT, GLuint, uint, GLuint, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTangent3bEXT, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTangent3dEXT, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTangent3fEXT, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTangent3iEXT, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTangent3sEXT, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexBufferEXT, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTextureBufferEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTextureLightEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTextureMaterialEXT, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTextureNormalEXT, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glTexturePageCommitmentEXT, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTextureParameterfEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTextureParameteriEXT, GLuint, uint, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTextureRenderbufferEXT, GLuint, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glTextureStorage1DEXT, GLuint, uint, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTextureStorage2DEXT, GLuint, uint, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTextureStorage2DMultisampleEXT, GLuint, uint, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTextureStorage3DEXT, GLuint, uint, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTextureStorage3DMultisampleEXT, GLuint, uint, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1uiEXT, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2uiEXT, GLint, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3uiEXT, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4uiEXT, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniformBufferEXT, GLuint, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glUnlockArraysEXT)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glUnmapNamedBufferEXT, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUseShaderProgramEXT, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexArrayVertexAttribBindingEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexArrayVertexAttribDivisorEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glVertexArrayVertexAttribFormatEXT, GLuint, uint, GLuint, uint, GLint, int, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexArrayVertexAttribIFormatEXT, GLuint, uint, GLuint, uint, GLint, int, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexArrayVertexAttribLFormatEXT, GLuint, uint, GLuint, uint, GLint, int, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexArrayVertexBindingDivisorEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribI1iEXT, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribI1uiEXT, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribI2iEXT, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribI2uiEXT, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribI3iEXT, GLuint, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribI3uiEXT, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribI4iEXT, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribI4uiEXT, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribL1dEXT, GLuint, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribL2dEXT, GLuint, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribL3dEXT, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribL4dEXT, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glVertexWeightfEXT, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glWriteMaskEXT, GLuint, uint, GLuint, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glActiveProgramEXT, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glActiveStencilFaceEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glApplyTextureEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glAreTexturesResidentEXT, boolean, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glArrayElementEXT, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginTransformFeedbackEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glBeginVertexShaderEXT)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindBufferBaseEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindFragDataLocationEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindFramebufferEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glBindImageTextureEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLint, duk_get_int(ctx, 4), GLenum, duk_get_uint(ctx, 5), GLint, duk_get_int(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glBindLightParameterEXT, uint, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glBindMaterialParameterEXT, uint, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindMultiTextureEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glBindParameterEXT, uint, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindRenderbufferEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glBindTexGenParameterEXT, uint, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindTextureEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glBindTextureUnitParameterEXT, uint, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBindVertexShaderEXT, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBinormal3bEXT, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glBinormal3bvEXT, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBinormal3dEXT, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glBinormal3dvEXT, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBinormal3fEXT, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glBinormal3fvEXT, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBinormal3iEXT, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glBinormal3ivEXT, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBinormal3sEXT, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glBinormal3svEXT, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendColorEXT, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBlendEquationEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendEquationSeparateEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendFuncSeparateEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(/*EMPTY*/,/*EMPTY*/,glBlitFramebufferEXT, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLint, duk_get_int(ctx, 7), GLbitfield, duk_get_uint(ctx, 8), GLenum, duk_get_uint(ctx, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glCheckFramebufferStatusEXT, uint, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glCheckNamedFramebufferStatusEXT, uint, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearColorIiEXT, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearColorIuiEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClientAttribDefaultEXT, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glColorMaskIndexedEXT, GLuint, duk_get_uint(ctx, 0), GLboolean, duk_get_boolean(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLboolean, duk_get_boolean(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameterfEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glConvolutionParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameteriEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glConvolutionParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyColorSubTableEXT, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyConvolutionFilter1DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyConvolutionFilter2DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glCopyMultiTexImage1DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLint, duk_get_int(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glCopyMultiTexImage2DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLsizei, var7, GLint, duk_get_int(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glCopyMultiTexSubImage1DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var7 = duk_get_int(ctx, 7); GLsizei var8 = duk_get_int(ctx, 8); ,/*EMPTY*/,glCopyMultiTexSubImage2DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLsizei, var7, GLsizei, var8)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(GLsizei var8 = duk_get_int(ctx, 8); GLsizei var9 = duk_get_int(ctx, 9); ,/*EMPTY*/,glCopyMultiTexSubImage3DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLint, duk_get_int(ctx, 7), GLsizei, var8, GLsizei, var9)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyTexImage1DEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLint, duk_get_int(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glCopyTexImage2DEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLint, duk_get_int(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyTexSubImage1DEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glCopyTexSubImage2DEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLsizei, var7)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var7 = duk_get_int(ctx, 7); GLsizei var8 = duk_get_int(ctx, 8); ,/*EMPTY*/,glCopyTexSubImage3DEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLsizei, var7, GLsizei, var8)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glCopyTextureImage1DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLint, duk_get_int(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glCopyTextureImage2DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLsizei, var7, GLint, duk_get_int(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glCopyTextureSubImage1DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var7 = duk_get_int(ctx, 7); GLsizei var8 = duk_get_int(ctx, 8); ,/*EMPTY*/,glCopyTextureSubImage2DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLsizei, var7, GLsizei, var8)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(GLsizei var8 = duk_get_int(ctx, 8); GLsizei var9 = duk_get_int(ctx, 9); ,/*EMPTY*/,glCopyTextureSubImage3DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLint, duk_get_int(ctx, 7), GLsizei, var8, GLsizei, var9)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glCreateShaderProgramEXT, uint, GLenum, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLdouble var1 [1]; ,duk_gl_put_GLdouble_array(ctx, 1, 1, var1, 1); ,glCullParameterdvEXT, GLenum, duk_get_uint(ctx, 0), GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [1]; ,duk_gl_put_GLfloat_array(ctx, 1, 1, var1, 1); ,glCullParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteFramebuffersEXT, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteRenderbuffersEXT, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteTexturesEXT, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDeleteVertexShaderEXT, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthBoundsEXT, GLclampd, duk_get_number(ctx, 0), GLclampd, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [0]; ,/*EMPTY*/,glDetailTexFuncSGIS, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableClientStateIndexedEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableClientStateiEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableIndexedEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDisableVariantClientStateEXT, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableVertexArrayAttribEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableVertexArrayEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glDrawArraysEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawArraysInstancedEXT, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0); GLsizei var1 = duk_get_int(ctx, 1);  GLboolean var2 [0]; ,/*EMPTY*/,glEdgeFlagPointerEXT, GLsizei, var0, GLsizei, var1, const GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableClientStateIndexedEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableClientStateiEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableIndexedEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEnableVariantClientStateEXT, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableVertexArrayAttribEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableVertexArrayEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndTransformFeedbackEXT)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndVertexShaderEXT)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glExtractComponentEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFogCoorddEXT, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [1]; ,/*EMPTY*/,glFogCoorddvEXT, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFogCoordfEXT, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [1]; ,/*EMPTY*/,glFogCoordfvEXT, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLfloat var1 [0]; ,/*EMPTY*/,glFogFuncSGIS, GLsizei, var0, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glFrameTerminatorGREMEDY)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFramebufferDrawBufferEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLenum var2 [0]; ,/*EMPTY*/,glFramebufferDrawBuffersEXT, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFramebufferReadBufferEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glFramebufferRenderbufferEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture1DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture2DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture3DEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureFaceEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureLayerEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glFramebufferTextureMultiviewOVR, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenFramebuffersEXT, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenRenderbuffersEXT, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(/*EMPTY*/,/*EMPTY*/,glGenSymbolsEXT, uint, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenTexturesEXT, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glGenVertexShadersEXT, uint, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGenerateMipmapEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glGenerateMultiTexMipmapEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glGenerateTextureMipmapEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLboolean var2 [1]; ,duk_gl_put_GLboolean_array(ctx, 2, 1, var2, 1); ,glGetBooleanIndexedvEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetConvolutionParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetConvolutionParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetDetailTexFuncSGIS, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetDoubleIndexedvEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [0]; ,duk_gl_put_GLdouble_array(ctx, 2, 0, var2, 0); ,glGetDoublei_vEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetFloatIndexedvEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glGetFloati_vEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(GLfloat var0 [0]; ,duk_gl_put_GLfloat_array(ctx, 0, 0, var0, 0); ,glGetFogFuncSGIS, GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetFragDataLocationEXT, int, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetFramebufferAttachmentParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetFramebufferParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetHistogramParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetHistogramParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetIntegerIndexedvEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glGetInvariantBooleanvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glGetInvariantFloatvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); ,glGetInvariantIntegervEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glGetLocalConstantBooleanvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glGetLocalConstantFloatvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); ,glGetLocalConstantIntegervEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMinmaxParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetMinmaxParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetMultiTexEnvfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetMultiTexEnvivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetMultiTexGendvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetMultiTexGenfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetMultiTexGenivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLfloat var4 [1]; ,duk_gl_put_GLfloat_array(ctx, 4, 1, var4, 1); ,glGetMultiTexLevelParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLint var4 [1]; ,duk_gl_put_GLint_array(ctx, 4, 1, var4, 1); ,glGetMultiTexLevelParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetMultiTexParameterIivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLuint var3 [1]; ,duk_gl_put_GLuint_array(ctx, 3, 1, var3, 1); ,glGetMultiTexParameterIuivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetMultiTexParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetMultiTexParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetNamedBufferParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetNamedFramebufferAttachmentParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetNamedFramebufferParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetNamedProgramLocalParameterIivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLuint var3 [1]; ,duk_gl_put_GLuint_array(ctx, 3, 1, var3, 1); ,glGetNamedProgramLocalParameterIuivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetNamedProgramLocalParameterdvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetNamedProgramLocalParameterfvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetNamedProgramivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetNamedRenderbufferParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLchar var4 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 4, 0, var4, 0); ,glGetObjectLabelEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetPixelTexGenParameterfvSGIS, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLint var1 [0]; ,duk_gl_put_GLint_array(ctx, 1, 0, var1, 0); ,glGetPixelTexGenParameterivSGIS, GLenum, duk_get_uint(ctx, 0), GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetPixelTransformParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetPixelTransformParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64 var2 [0]; ,duk_gl_put_GLint64_array(ctx, 2, 0, var2, 0); ,glGetQueryObjecti64vEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64 var2 [0]; ,duk_gl_put_GLuint64_array(ctx, 2, 0, var2, 0); ,glGetQueryObjectui64vEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetRenderbufferParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetSharpenTexFuncSGIS, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glGetTexFilterFuncSGIS, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTexParameterIivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetTexParameterIuivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLfloat var4 [1]; ,duk_gl_put_GLfloat_array(ctx, 4, 1, var4, 1); ,glGetTextureLevelParameterfvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLint var4 [1]; ,duk_gl_put_GLint_array(ctx, 4, 1, var4, 1); ,glGetTextureLevelParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetTextureParameterIivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLuint var3 [1]; ,duk_gl_put_GLuint_array(ctx, 3, 1, var3, 1); ,glGetTextureParameterIuivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetTextureParameterfvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetTextureParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var3 [0]; GLsizei var4 [0]; GLenum var5 [0]; GLchar var6 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLsizei_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLchar_array(ctx, 6, 0, var6, 0); ,glGetTransformFeedbackVaryingEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetUniformBufferSizeEXT, int, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetUniformuivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glGetVariantBooleanvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glGetVariantFloatvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); ,glGetVariantIntegervEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [0]; ,duk_gl_put_GLint_array(ctx, 3, 0, var3, 0); ,glGetVertexArrayIntegeri_vEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); ,glGetVertexArrayIntegervEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribIivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribIuivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribLdvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glHintPGI, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glHistogramEXT, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLboolean, duk_get_boolean(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glIndexFuncEXT, GLenum, duk_get_uint(ctx, 0), GLclampf, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glIndexMaterialEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glInsertComponentEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glInsertEventMarkerEXT, GLsizei, var0, const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glIsEnabledIndexedEXT, boolean, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsFramebufferEXT, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsRenderbufferEXT, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsTextureEXT, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glIsVariantEnabledEXT, boolean, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glLabelObjectEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLchar *, duk_get_string(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glLockArraysEXT, GLint, duk_get_int(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glMatrixFrustumEXT, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5), GLdouble, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMatrixLoadIdentityEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [0]; ,/*EMPTY*/,glMatrixLoadTransposedEXT, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixLoadTransposefEXT, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [0]; ,/*EMPTY*/,glMatrixLoaddEXT, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixLoadfEXT, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [0]; ,/*EMPTY*/,glMatrixMultTransposedEXT, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixMultTransposefEXT, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [0]; ,/*EMPTY*/,glMatrixMultdEXT, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixMultfEXT, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glMatrixOrthoEXT, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5), GLdouble, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMatrixPopEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMatrixPushEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMatrixRotatedEXT, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMatrixRotatefEXT, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMatrixScaledEXT, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMatrixScalefEXT, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMatrixTranslatedEXT, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMatrixTranslatefEXT, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMemoryBarrierEXT, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMinmaxEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3);  GLint var1 [0];  GLsizei var2 [0]; ,/*EMPTY*/,glMultiDrawArraysEXT, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexBufferEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexEnvfEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [1]; ,/*EMPTY*/,glMultiTexEnvfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexEnviEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glMultiTexEnvivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexGendEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLdouble var3 [1]; ,/*EMPTY*/,glMultiTexGendvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexGenfEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [1]; ,/*EMPTY*/,glMultiTexGenfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexGeniEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glMultiTexGenivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glMultiTexParameterIivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [1]; ,/*EMPTY*/,glMultiTexParameterIuivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexParameterfEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [1]; ,/*EMPTY*/,glMultiTexParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexParameteriEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glMultiTexParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexRenderbufferEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferParameteriEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferRenderbufferEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTexture1DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTexture2DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTexture3DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTextureEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTextureFaceEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTextureLayerEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glNamedProgramLocalParameter4dEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5), GLdouble, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLdouble var3 [4]; ,/*EMPTY*/,glNamedProgramLocalParameter4dvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glNamedProgramLocalParameter4fEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [4]; ,/*EMPTY*/,glNamedProgramLocalParameter4fvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glNamedProgramLocalParameterI4iEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [4]; ,/*EMPTY*/,glNamedProgramLocalParameterI4ivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glNamedProgramLocalParameterI4uiEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [4]; ,/*EMPTY*/,glNamedProgramLocalParameterI4uivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3);  GLfloat var4 [4]; ,/*EMPTY*/,glNamedProgramLocalParameters4fvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3);  GLint var4 [4]; ,/*EMPTY*/,glNamedProgramLocalParametersI4ivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLint *, duk_gl_get_GLint_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3);  GLuint var4 [4]; ,/*EMPTY*/,glNamedProgramLocalParametersI4uivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLuint *, duk_gl_get_GLuint_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glNamedRenderbufferStorageEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glNamedRenderbufferStorageMultisampleCoverageEXT, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glNamedRenderbufferStorageMultisampleEXT, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelTexGenParameterfSGIS, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glPixelTexGenParameterfvSGIS, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelTexGenParameteriSGIS, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [0]; ,/*EMPTY*/,glPixelTexGenParameterivSGIS, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPixelTransformParameterfEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glPixelTransformParameterfvEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPixelTransformParameteriEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glPixelTransformParameterivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPointParameterfEXT, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPointParameterfSGIS, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glPointParameterfvEXT, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glPointParameterfvSGIS, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPolygonOffsetClampEXT, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPolygonOffsetEXT, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPopGroupMarkerEXT)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0];  GLclampf var2 [0]; ,/*EMPTY*/,glPrioritizeTexturesEXT, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), const GLclampf *, duk_gl_get_GLclampf_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [4]; ,/*EMPTY*/,glProgramEnvParameters4fvEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [4]; ,/*EMPTY*/,glProgramLocalParameters4fvEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramParameteriEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1dEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [1]; ,/*EMPTY*/,glProgramUniform1dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1fEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [1]; ,/*EMPTY*/,glProgramUniform1fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [1]; ,/*EMPTY*/,glProgramUniform1ivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1uiEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [1]; ,/*EMPTY*/,glProgramUniform1uivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2dEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [2]; ,/*EMPTY*/,glProgramUniform2dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2fEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [2]; ,/*EMPTY*/,glProgramUniform2fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [2]; ,/*EMPTY*/,glProgramUniform2ivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2uiEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [2]; ,/*EMPTY*/,glProgramUniform2uivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3dEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [3]; ,/*EMPTY*/,glProgramUniform3dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3fEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [3]; ,/*EMPTY*/,glProgramUniform3fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [3]; ,/*EMPTY*/,glProgramUniform3ivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3uiEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [3]; ,/*EMPTY*/,glProgramUniform3uivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4dEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [4]; ,/*EMPTY*/,glProgramUniform4dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4fEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [4]; ,/*EMPTY*/,glProgramUniform4fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [4]; ,/*EMPTY*/,glProgramUniform4ivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4uiEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [4]; ,/*EMPTY*/,glProgramUniform4uivEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [4]; ,/*EMPTY*/,glProgramUniformMatrix2dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [4]; ,/*EMPTY*/,glProgramUniformMatrix2fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix2x3dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix2x3fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix2x4dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix2x4fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [9]; ,/*EMPTY*/,glProgramUniformMatrix3dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 9, var4, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [9]; ,/*EMPTY*/,glProgramUniformMatrix3fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 9, var4, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix3x2dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix3x2fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix3x4dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix3x4fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [16]; ,/*EMPTY*/,glProgramUniformMatrix4dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 16, var4, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [16]; ,/*EMPTY*/,glProgramUniformMatrix4fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 16, var4, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix4x2dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix4x2fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix4x3dvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix4x3fvEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glProvokingVertexEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPushClientAttribDefaultEXT, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glPushGroupMarkerEXT, GLsizei, var0, const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glRasterSamplesEXT, GLuint, duk_get_uint(ctx, 0), GLboolean, duk_get_boolean(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glRenderbufferStorageEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glRenderbufferStorageMultisampleEXT, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glResetHistogramEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glResetMinmaxEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSampleMaskEXT, GLclampf, duk_get_number(ctx, 0), GLboolean, duk_get_boolean(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSampleMaskSGIS, GLclampf, duk_get_number(ctx, 0), GLboolean, duk_get_boolean(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glSamplePatternEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glSamplePatternSGIS, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3bEXT, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glSecondaryColor3bvEXT, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3dEXT, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glSecondaryColor3dvEXT, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3fEXT, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glSecondaryColor3fvEXT, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3iEXT, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glSecondaryColor3ivEXT, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3sEXT, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glSecondaryColor3svEXT, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3ubEXT, GLubyte, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [3]; ,/*EMPTY*/,glSecondaryColor3ubvEXT, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3uiEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLuint var0 [3]; ,/*EMPTY*/,glSecondaryColor3uivEXT, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3usEXT, GLushort, duk_get_uint(ctx, 0), GLushort, duk_get_uint(ctx, 1), GLushort, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLushort var0 [3]; ,/*EMPTY*/,glSecondaryColor3usvEXT, const GLushort *, duk_gl_get_GLushort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glShaderOp1EXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glShaderOp2EXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glShaderOp3EXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [0]; ,/*EMPTY*/,glSharpenTexFuncSGIS, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glStencilClearTagEXT, GLsizei, var0, GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glSwizzleEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4), GLenum, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTangent3bEXT, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glTangent3bvEXT, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTangent3dEXT, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glTangent3dvEXT, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTangent3fEXT, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glTangent3fvEXT, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTangent3iEXT, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glTangent3ivEXT, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTangent3sEXT, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glTangent3svEXT, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexBufferEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [0]; ,/*EMPTY*/,glTexFilterFuncSGIS, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTexParameterIivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [1]; ,/*EMPTY*/,glTexParameterIuivEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTextureBufferEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTextureColorMaskSGIS, GLboolean, duk_get_boolean(ctx, 0), GLboolean, duk_get_boolean(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLboolean, duk_get_boolean(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTextureLightEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTextureMaterialEXT, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTextureNormalEXT, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glTexturePageCommitmentEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLsizei, var7, GLboolean, duk_get_boolean(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glTextureParameterIivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [1]; ,/*EMPTY*/,glTextureParameterIuivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTextureParameterfEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [1]; ,/*EMPTY*/,glTextureParameterfvEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTextureParameteriEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glTextureParameterivEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTextureRenderbufferEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glTextureStorage1DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTextureStorage2DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTextureStorage2DMultisampleEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLsizei, var5, GLboolean, duk_get_boolean(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glTextureStorage3DEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLsizei, var5, GLsizei, var6)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glTextureStorage3DMultisampleEXT, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLsizei, var5, GLsizei, var6, GLboolean, duk_get_boolean(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glTransformFeedbackVaryingsEXT, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLchar * const *, duk_get_string(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1uiEXT, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [1]; ,/*EMPTY*/,glUniform1uivEXT, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2uiEXT, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [2]; ,/*EMPTY*/,glUniform2uivEXT, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3uiEXT, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [3]; ,/*EMPTY*/,glUniform3uivEXT, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4uiEXT, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [4]; ,/*EMPTY*/,glUniform4uivEXT, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniformBufferEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glUnlockArraysEXT)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glUnmapNamedBufferEXT, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUseShaderProgramEXT, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVariantbvEXT, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVariantdvEXT, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glVariantfvEXT, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glVariantivEXT, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVariantsvEXT, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [1]; ,/*EMPTY*/,glVariantubvEXT, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glVariantuivEXT, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [1]; ,/*EMPTY*/,glVariantusvEXT, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexArrayVertexAttribBindingEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexArrayVertexAttribDivisorEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glVertexArrayVertexAttribFormatEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLboolean, duk_get_boolean(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexArrayVertexAttribIFormatEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexArrayVertexAttribLFormatEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexArrayVertexBindingDivisorEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribI1iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glVertexAttribI1ivEXT, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribI1uiEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glVertexAttribI1uivEXT, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribI2iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [2]; ,/*EMPTY*/,glVertexAttribI2ivEXT, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribI2uiEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [2]; ,/*EMPTY*/,glVertexAttribI2uivEXT, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribI3iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [3]; ,/*EMPTY*/,glVertexAttribI3ivEXT, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribI3uiEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glVertexAttribI3uivEXT, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVertexAttribI4bvEXT, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribI4iEXT, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glVertexAttribI4ivEXT, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glVertexAttribI4svEXT, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [4]; ,/*EMPTY*/,glVertexAttribI4ubvEXT, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribI4uiEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glVertexAttribI4uivEXT, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [4]; ,/*EMPTY*/,glVertexAttribI4usvEXT, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribL1dEXT, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVertexAttribL1dvEXT, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribL2dEXT, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glVertexAttribL2dvEXT, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribL3dEXT, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glVertexAttribL3dvEXT, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribL4dEXT, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glVertexAttribL4dvEXT, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glVertexWeightfEXT, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [1]; ,/*EMPTY*/,glVertexWeightfvEXT, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glWriteMaskEXT, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4), GLenum, duk_get_uint(ctx, 5))
 #endif /* DUK_GL_EXT */
 
 #ifdef DUK_GL_HP
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glImageTransformParameterfHP, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glImageTransformParameteriHP, GLenum, uint, GLenum, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetImageTransformParameterfvHP, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetImageTransformParameterivHP, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glImageTransformParameterfHP, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glImageTransformParameterfvHP, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glImageTransformParameteriHP, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glImageTransformParameterivHP, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
 #endif /* DUK_GL_HP */
 
 #ifdef DUK_GL_IBM
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFlushStaticDataIBM, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendFuncSeparateINGR, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFlushStaticDataIBM, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3);  GLenum var0 [0];  GLint var1 [0];  GLsizei var2 [0]; ,/*EMPTY*/,glMultiModeDrawArraysIBM, const GLenum *, duk_gl_get_GLenum_array(ctx, 0, 0, var0, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLsizei, var3, GLint, duk_get_int(ctx, 4))
 #endif /* DUK_GL_IBM */
 
 #ifdef DUK_GL_INTEL
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glApplyFramebufferAttachmentCMAAINTEL)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginPerfQueryINTEL, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeletePerfQueryINTEL, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEndPerfQueryINTEL, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glSyncTextureINTEL, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUnmapTexture2DINTEL, GLuint, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glApplyFramebufferAttachmentCMAAINTEL)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginConditionalRenderNVX, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginPerfQueryINTEL, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreatePerfQueryINTEL, GLuint, duk_get_uint(ctx, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDeletePerfQueryINTEL, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndConditionalRenderNVX)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEndPerfQueryINTEL, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(GLuint var0 [0]; ,duk_gl_put_GLuint_array(ctx, 0, 0, var0, 0); ,glGetFirstPerfQueryIdINTEL, GLuint *, duk_gl_get_GLuint_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGetNextPerfQueryIdINTEL, GLuint, duk_get_uint(ctx, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(GLchar var3 [0]; GLchar var5 [0]; GLuint var6 [0]; GLuint var7 [0]; GLuint var8 [0]; GLuint var9 [0]; GLuint64 var10 [0]; ,duk_gl_put_GLchar_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 5, 0, var5, 0); duk_gl_put_GLuint_array(ctx, 6, 0, var6, 0); duk_gl_put_GLuint_array(ctx, 7, 0, var7, 0); duk_gl_put_GLuint_array(ctx, 8, 0, var8, 0); duk_gl_put_GLuint_array(ctx, 9, 0, var9, 0); duk_gl_put_GLuint64_array(ctx, 10, 0, var10, 0); ,glGetPerfCounterInfoINTEL, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLchar *, duk_gl_get_GLchar_array(ctx, 3, 0, var3, 0), GLuint, duk_get_uint(ctx, 4), GLchar *, duk_gl_get_GLchar_array(ctx, 5, 0, var5, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 6, 0, var6, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 7, 0, var7, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 8, 0, var8, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 9, 0, var9, 0), GLuint64 *, duk_gl_get_GLuint64_array(ctx, 10, 0, var10, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLchar var0 [0]; GLuint var1 [0]; ,duk_gl_put_GLchar_array(ctx, 0, 0, var0, 0); duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGetPerfQueryIdByNameINTEL, GLchar *, duk_gl_get_GLchar_array(ctx, 0, 0, var0, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLchar var2 [0]; GLuint var3 [0]; GLuint var4 [0]; GLuint var5 [0]; GLuint var6 [0]; ,duk_gl_put_GLchar_array(ctx, 2, 0, var2, 0); duk_gl_put_GLuint_array(ctx, 3, 0, var3, 0); duk_gl_put_GLuint_array(ctx, 4, 0, var4, 0); duk_gl_put_GLuint_array(ctx, 5, 0, var5, 0); duk_gl_put_GLuint_array(ctx, 6, 0, var6, 0); ,glGetPerfQueryInfoINTEL, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLchar *, duk_gl_get_GLchar_array(ctx, 2, 0, var2, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 5, 0, var5, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glSyncTextureINTEL, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUnmapTexture2DINTEL, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
 #endif /* DUK_GL_INTEL */
 
 #ifdef DUK_GL_MESA
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableTraceMESA, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableTraceMESA, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndTraceMESA)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glResizeBuffersMESA)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTraceAssertAttribMESA, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2dMESA, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2fMESA, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2iMESA, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2sMESA, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3dMESA, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3fMESA, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3iMESA, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3sMESA, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glWindowPos4dMESA, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glWindowPos4fMESA, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glWindowPos4iMESA, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glWindowPos4sMESA, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDisableTraceMESA, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEnableTraceMESA, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndTraceMESA)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [1]; GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetProgramRegisterfvMESA, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 1, var2, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [0]; ,/*EMPTY*/,glNewTraceMESA, GLbitfield, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glResizeBuffersMESA)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTraceAssertAttribMESA, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [0]; ,/*EMPTY*/,glTraceCommentMESA, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [0]; ,/*EMPTY*/,glTraceListMESA, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [0]; ,/*EMPTY*/,glTraceTextureMESA, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2dMESA, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glWindowPos2dvMESA, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2fMESA, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glWindowPos2fvMESA, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2iMESA, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [2]; ,/*EMPTY*/,glWindowPos2ivMESA, const GLint *, duk_gl_get_GLint_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2sMESA, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [2]; ,/*EMPTY*/,glWindowPos2svMESA, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3dMESA, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glWindowPos3dvMESA, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3fMESA, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glWindowPos3fvMESA, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3iMESA, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glWindowPos3ivMESA, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3sMESA, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glWindowPos3svMESA, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glWindowPos4dMESA, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [4]; ,/*EMPTY*/,glWindowPos4dvMESA, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glWindowPos4fMESA, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [4]; ,/*EMPTY*/,glWindowPos4fvMESA, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glWindowPos4iMESA, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [4]; ,/*EMPTY*/,glWindowPos4ivMESA, const GLint *, duk_gl_get_GLint_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glWindowPos4sMESA, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [4]; ,/*EMPTY*/,glWindowPos4svMESA, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 4, var0, 4))
 #endif /* DUK_GL_MESA */
 
 #ifdef DUK_GL_NV
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glActiveVaryingNV, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBeginConditionalRenderNV, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginOcclusionQueryNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginTransformFeedbackNV, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginVideoCaptureNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindBufferBaseNV, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindProgramNV, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindTransformFeedbackNV, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glBindVideoCaptureStreamTextureNV, GLuint, uint, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glBlendBarrierNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendParameteriNV, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCallCommandListNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearDepthdNV, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColorFormatNV, GLint, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCombinerInputNV, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glCombinerOutputNV, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glCombinerParameterfNV, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glCombinerParameteriNV, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glCommandListSegmentsNV, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCompileCommandListNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glConservativeRasterParameterfNV, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(glCopyImageSubDataNV, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glCopyPathNV, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glCoverFillPathNV, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glCoverStrokePathNV, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCoverageModulationNV, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDeletePathsNV, GLuint, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthBoundsdNV, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRangedNV, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(glDrawTextureNV, GLuint, uint, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDrawTransformFeedbackNV, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEdgeFlagFormatNV, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndConditionalRenderNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndOcclusionQueryNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndTransformFeedbackNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEndVideoCaptureNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEvalMapsNV, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glFinalCombinerInputNV, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFinishFenceNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFlushPixelDataRangeNV, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glFlushVertexArrayRangeNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFogCoordFormatNV, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFogCoordhNV, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFragmentCoverageColorNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGenPathsNV, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetCommandHeaderNV, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(glGetImageHandleNV, uint, GLuint, uint, GLint, int, GLboolean, boolean, GLint, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetPathLengthNV, number, GLuint, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGetStageIndexNV, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGetTextureHandleNV, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetTextureSamplerHandleNV, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetVaryingLocationNV, int, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glIndexFormatNV, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glInterpolatePathsNV, GLuint, uint, GLuint, uint, GLuint, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsBufferResidentNV, boolean, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsCommandListNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsFenceNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsImageHandleResidentNV, boolean, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsNamedBufferResidentNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsOcclusionQueryNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsPathNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(glIsPointInFillPathNV, boolean, GLuint, uint, GLuint, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glIsPointInStrokePathNV, boolean, GLuint, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsProgramNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsStateNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTextureHandleResidentNV, boolean, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTransformFeedbackNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeBufferNonResidentNV, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMakeBufferResidentNV, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeImageHandleNonResidentNV, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMakeImageHandleResidentNV, GLuint64, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeNamedBufferNonResidentNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMakeNamedBufferResidentNV, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeTextureHandleNonResidentNV, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMakeTextureHandleResidentNV, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1hNV, GLenum, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2hNV, GLenum, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3hNV, GLenum, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4hNV, GLenum, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glNormalFormatNV, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPathCoverDepthFuncNV, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPathFogGenNV, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPathParameterfNV, GLuint, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPathParameteriNV, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPathStencilDepthOffsetNV, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glPathStencilFuncNV, GLenum, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPauseTransformFeedbackNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPointParameteriNV, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(glPresentFrameDualFillNV, GLuint, uint, GLuint64EXT, uint, GLuint, uint, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(glPresentFrameKeyedNV, GLuint, uint, GLuint64EXT, uint, GLuint, uint, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLuint, uint, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPrimitiveRestartIndexNV, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPrimitiveRestartNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramEnvParameterI4iNV, GLenum, uint, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramEnvParameterI4uiNV, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramLocalParameterI4iNV, GLenum, uint, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramLocalParameterI4uiNV, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramParameter4dNV, GLenum, uint, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramParameter4fNV, GLenum, uint, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1i64NV, GLuint, uint, GLint, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1ui64NV, GLuint, uint, GLint, int, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2i64NV, GLuint, uint, GLint, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2ui64NV, GLuint, uint, GLint, int, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3i64NV, GLuint, uint, GLint, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3ui64NV, GLuint, uint, GLint, int, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4i64NV, GLuint, uint, GLint, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4ui64NV, GLuint, uint, GLint, int, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniformHandleui64NV, GLuint, uint, GLint, int, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniformui64NV, GLuint, uint, GLint, int, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glProgramVertexLimitNV, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glRenderbufferStorageMultisampleCoverageNV, GLenum, uint, GLsizei, int, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glResolveDepthValuesNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glResumeTransformFeedbackNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleMaskIndexedNV, GLuint, uint, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColorFormatNV, GLint, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSetFenceNV, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glStateCaptureNV, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glStencilFillPathNV, GLuint, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glStencilStrokePathNV, GLuint, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glStencilThenCoverFillPathNV, GLuint, uint, GLenum, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glStencilThenCoverStrokePathNV, GLuint, uint, GLint, int, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSubpixelPrecisionBiasNV, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glTestFenceNV, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1hNV, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2hNV, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoordFormatNV, GLint, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTexImage2DMultisampleCoverageNV, GLenum, uint, GLsizei, int, GLsizei, int, GLint, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTexImage3DMultisampleCoverageNV, GLenum, uint, GLsizei, int, GLsizei, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexRenderbufferNV, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glTextureBarrierNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTextureImage2DMultisampleCoverageNV, GLuint, uint, GLenum, uint, GLsizei, int, GLsizei, int, GLint, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTextureImage2DMultisampleNV, GLuint, uint, GLenum, uint, GLsizei, int, GLint, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glTextureImage3DMultisampleCoverageNV, GLuint, uint, GLenum, uint, GLsizei, int, GLsizei, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTextureImage3DMultisampleNV, GLuint, uint, GLenum, uint, GLsizei, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTrackMatrixNV, GLenum, uint, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1i64NV, GLint, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1ui64NV, GLint, int, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2i64NV, GLint, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2ui64NV, GLint, int, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3i64NV, GLint, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3ui64NV, GLint, int, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4i64NV, GLint, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4ui64NV, GLint, int, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniformHandleui64NV, GLint, int, GLuint64, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniformui64NV, GLint, int, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glVDPAUFiniNV)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex2hNV, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex3hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertex4hNV, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1dNV, GLuint, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1fNV, GLuint, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1hNV, GLuint, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1sNV, GLuint, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2dNV, GLuint, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2fNV, GLuint, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2hNV, GLuint, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2sNV, GLuint, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3dNV, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3fNV, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3hNV, GLuint, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3sNV, GLuint, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4dNV, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4fNV, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4hNV, GLuint, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint, GLhalfNV, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4sNV, GLuint, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4ubNV, GLuint, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribFormatNV, GLuint, uint, GLint, int, GLenum, uint, GLboolean, boolean, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribIFormatNV, GLuint, uint, GLint, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribL1i64NV, GLuint, uint, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribL1ui64NV, GLuint, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribL2i64NV, GLuint, uint, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribL2ui64NV, GLuint, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribL3i64NV, GLuint, uint, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribL3ui64NV, GLuint, uint, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribL4i64NV, GLuint, uint, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int, GLint64EXT, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribL4ui64NV, GLuint, uint, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint, GLuint64EXT, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribLFormatNV, GLuint, uint, GLint, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexFormatNV, GLint, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glVertexWeighthNV, GLhalfNV, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glActiveVaryingNV, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glAreProgramsResidentNV, boolean, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBeginConditionalRenderNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginOcclusionQueryNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginTransformFeedbackNV, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginVideoCaptureNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindBufferBaseNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindProgramNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindTransformFeedbackNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glBindVideoCaptureStreamTextureNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glBlendBarrierNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendParameteriNV, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCallCommandListNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearDepthdNV, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glColor3hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glColor4hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glColorFormatNV, GLint, duk_get_int(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glCombinerInputNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4), GLenum, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(/*EMPTY*/,/*EMPTY*/,glCombinerOutputNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4), GLenum, duk_get_uint(ctx, 5), GLenum, duk_get_uint(ctx, 6), GLboolean, duk_get_boolean(ctx, 7), GLboolean, duk_get_boolean(ctx, 8), GLboolean, duk_get_boolean(ctx, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glCombinerParameterfNV, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glCombinerParameterfvNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glCombinerParameteriNV, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glCombinerParameterivNV, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glCombinerStageParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glCommandListSegmentsNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCompileCommandListNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glConservativeRasterParameterfNV, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(GLsizei var12 = duk_get_int(ctx, 12); GLsizei var13 = duk_get_int(ctx, 13); GLsizei var14 = duk_get_int(ctx, 14); ,/*EMPTY*/,glCopyImageSubDataNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLenum, duk_get_uint(ctx, 7), GLint, duk_get_int(ctx, 8), GLint, duk_get_int(ctx, 9), GLint, duk_get_int(ctx, 10), GLint, duk_get_int(ctx, 11), GLsizei, var12, GLsizei, var13, GLsizei, var14)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glCopyPathNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glCoverFillPathNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glCoverStrokePathNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCoverageModulationNV, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLfloat var1 [0]; ,/*EMPTY*/,glCoverageModulationTableNV, GLsizei, var0, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateCommandListsNV, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateStatesNV, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteCommandListsNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteFencesNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteOcclusionQueriesNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glDeletePathsNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteProgramsNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteStatesNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteTransformFeedbacksNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthBoundsdNV, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthRangedNV, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_DETERMINE(ctx, 2);  GLuint64 var1 [0];  GLsizei var2 [0]; ,/*EMPTY*/,glDrawCommandsAddressNV, GLenum, duk_get_uint(ctx, 0), const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 1, 0, var1, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_DETERMINE(ctx, 1);  GLuint64 var0 [0];  GLsizei var1 [0];  GLuint var2 [0];  GLuint var3 [0]; ,/*EMPTY*/,glDrawCommandsStatesAddressNV, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 0, 0, var0, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 1, 0, var1, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(/*EMPTY*/,/*EMPTY*/,glDrawTextureNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8), GLfloat, duk_get_number(ctx, 9), GLfloat, duk_get_number(ctx, 10))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDrawTransformFeedbackNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glEdgeFlagFormatNV, GLsizei, var0)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndConditionalRenderNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndOcclusionQueryNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndTransformFeedbackNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEndVideoCaptureNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEvalMapsNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [0]; ,/*EMPTY*/,glExecuteProgramNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glFinalCombinerInputNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFinishFenceNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFlushPixelDataRangeNV, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glFlushVertexArrayRangeNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glFogCoordFormatNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFogCoordhNV, GLhalfNV, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glFogCoordhvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFragmentCoverageColorNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [1]; ,/*EMPTY*/,glFramebufferSampleLocationsfvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenFencesNV, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenOcclusionQueriesNV, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glGenPathsNV, uint, GLsizei, var0)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenProgramsNV, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenTransformFeedbacksNV, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var3 [0]; GLsizei var4 [0]; GLenum var5 [0]; GLchar var6 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLsizei_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLchar_array(ctx, 6, 0, var6, 0); ,glGetActiveVaryingNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetBufferParameterui64vNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLfloat var4 [1]; ,duk_gl_put_GLfloat_array(ctx, 4, 1, var4, 1); ,glGetCombinerInputParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLint var4 [1]; ,duk_gl_put_GLint_array(ctx, 4, 1, var4, 1); ,glGetCombinerInputParameterivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetCombinerOutputParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetCombinerOutputParameterivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetCombinerStageParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetCommandHeaderNV, uint, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetCoverageModulationTableNV, GLsizei, var0, GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetFenceivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetFinalCombinerInputParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetFinalCombinerInputParameterivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG5(/*EMPTY*/,/*EMPTY*/,glGetImageHandleNV, uint, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLint, duk_get_int(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetIntegerui64i_vNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLuint64EXT var1 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 1, 0, var1, 0); ,glGetIntegerui64vNV, GLenum, duk_get_uint(ctx, 0), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLint var5 [1]; ,duk_gl_put_GLint_array(ctx, 5, 1, var5, 1); ,glGetInternalformatSampleivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLint *, duk_gl_get_GLint_array(ctx, 5, 1, var5, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetMapAttribParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetMapAttribParameterivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMapParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetMapParameterivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMultisamplefvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetNamedBufferParameterui64vNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetOcclusionQueryivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetOcclusionQueryuivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetPathColorGenfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetPathColorGenivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLubyte var1 [0]; ,duk_gl_put_GLubyte_array(ctx, 1, 0, var1, 0); ,glGetPathCommandsNV, GLuint, duk_get_uint(ctx, 0), GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetPathCoordsNV, GLuint, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetPathDashArrayNV, GLuint, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glGetPathLengthNV, number, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); GLfloat var4 [0]; ,duk_gl_put_GLfloat_array(ctx, 4, 0, var4, 0); ,glGetPathMetricRangeNV, GLbitfield, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3, GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetPathParameterfvNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetPathParameterivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetPathTexGenfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetPathTexGenivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetProgramEnvParameterIivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetProgramEnvParameterIuivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetProgramLocalParameterIivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetProgramLocalParameterIuivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [1]; GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetProgramNamedParameterdvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 1, var2, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [1]; GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetProgramNamedParameterfvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 1, var2, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetProgramParameterdvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetProgramParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_DETERMINE(ctx, 6);  GLenum var4 [1]; GLsizei var6 [1]; GLfloat var7 [1]; ,duk_gl_put_GLsizei_array(ctx, 6, 1, var6, 1); duk_gl_put_GLfloat_array(ctx, 7, 1, var7, 1); ,glGetProgramResourcefvNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLenum *, duk_gl_get_GLenum_array(ctx, 4, 1, var4, 1), GLsizei, var5, GLsizei *, duk_gl_get_GLsizei_array(ctx, 6, 1, var6, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 7, 1, var7, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLubyte var2 [0]; ,duk_gl_put_GLubyte_array(ctx, 2, 0, var2, 0); ,glGetProgramStringNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetProgramSubroutineParameteruivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetProgramivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glGetStageIndexNV, uint, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glGetTextureHandleNV, uint, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetTextureSamplerHandleNV, uint, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetTrackMatrixivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); ,glGetTransformFeedbackVaryingNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64EXT var2 [0]; ,duk_gl_put_GLint64EXT_array(ctx, 2, 0, var2, 0); ,glGetUniformi64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetUniformui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetVaryingLocationNV, int, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64EXT var2 [0]; ,duk_gl_put_GLint64EXT_array(ctx, 2, 0, var2, 0); ,glGetVertexAttribLi64vNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetVertexAttribLui64vNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribdvNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribfvNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetVideoCaptureStreamdvNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetVideoCaptureStreamfvNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetVideoCaptureStreamivNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVideoCaptureivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64EXT var2 [0]; ,duk_gl_put_GLint64EXT_array(ctx, 2, 0, var2, 0); ,glGetVideoi64vNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVideoivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64EXT var2 [0]; ,duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glGetVideoui64vNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetVideouivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glIndexFormatNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glInterpolatePathsNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsBufferResidentNV, boolean, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsCommandListNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsFenceNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsImageHandleResidentNV, boolean, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsNamedBufferResidentNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsOcclusionQueryNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsPathNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG4(/*EMPTY*/,/*EMPTY*/,glIsPointInFillPathNV, boolean, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glIsPointInStrokePathNV, boolean, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsProgramNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsStateNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsTextureHandleResidentNV, boolean, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsTransformFeedbackNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLubyte var3 [0]; ,/*EMPTY*/,glLoadProgramNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeBufferNonResidentNV, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMakeBufferResidentNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeImageHandleNonResidentNV, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMakeImageHandleResidentNV, GLuint64, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeNamedBufferNonResidentNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMakeNamedBufferResidentNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeTextureHandleNonResidentNV, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMakeTextureHandleResidentNV, GLuint64, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glMapParameterfvNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glMapParameterivNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixLoad3x2fNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixLoad3x3fNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixLoadTranspose3x3fNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixMult3x2fNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixMult3x3fNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [0]; ,/*EMPTY*/,glMatrixMultTranspose3x3fNV, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1hNV, GLenum, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glMultiTexCoord1hvNV, GLenum, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2hNV, GLenum, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glMultiTexCoord2hvNV, GLenum, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3hNV, GLenum, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glMultiTexCoord3hvNV, GLenum, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4hNV, GLenum, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3), GLhalfNV, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glMultiTexCoord4hvNV, GLenum, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [1]; ,/*EMPTY*/,glNamedFramebufferSampleLocationsfvNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glNormal3hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glNormalFormatNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [0]; ,/*EMPTY*/,glPathColorGenNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPathCoverDepthFuncNV, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [0]; ,/*EMPTY*/,glPathDashArrayNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPathFogGenNV, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPathParameterfNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glPathParameterfvNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPathParameteriNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glPathParameterivNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPathStencilDepthOffsetNV, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glPathStencilFuncNV, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [0]; ,/*EMPTY*/,glPathTexGenNV, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPauseTransformFeedbackNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG8(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_int(ctx, 2); GLfloat var4 [0]; GLfloat var5 [0]; GLfloat var6 [0]; GLfloat var7 [0]; ,duk_gl_put_GLfloat_array(ctx, 4, 0, var4, 0); duk_gl_put_GLfloat_array(ctx, 5, 0, var5, 0); duk_gl_put_GLfloat_array(ctx, 6, 0, var6, 0); duk_gl_put_GLfloat_array(ctx, 7, 0, var7, 0); ,glPointAlongPathNV, boolean, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei, var2, GLfloat, duk_get_number(ctx, 3), GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 0, var4, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 5, 0, var5, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 6, 0, var6, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 7, 0, var7, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPointParameteriNV, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glPointParameterivNV, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(/*EMPTY*/,/*EMPTY*/,glPresentFrameDualFillNV, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4), GLenum, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLenum, duk_get_uint(ctx, 7), GLuint, duk_get_uint(ctx, 8), GLenum, duk_get_uint(ctx, 9), GLuint, duk_get_uint(ctx, 10), GLenum, duk_get_uint(ctx, 11), GLuint, duk_get_uint(ctx, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(/*EMPTY*/,/*EMPTY*/,glPresentFrameKeyedNV, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4), GLenum, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLuint, duk_get_uint(ctx, 7), GLenum, duk_get_uint(ctx, 8), GLuint, duk_get_uint(ctx, 9), GLuint, duk_get_uint(ctx, 10))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPrimitiveRestartIndexNV, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPrimitiveRestartNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3);  GLint var4 [1]; ,/*EMPTY*/,glProgramBufferParametersIivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3);  GLuint var4 [1]; ,/*EMPTY*/,glProgramBufferParametersIuivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLuint *, duk_gl_get_GLuint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3);  GLfloat var4 [1]; ,/*EMPTY*/,glProgramBufferParametersfvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramEnvParameterI4iNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [4]; ,/*EMPTY*/,glProgramEnvParameterI4ivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramEnvParameterI4uiNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [4]; ,/*EMPTY*/,glProgramEnvParameterI4uivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [4]; ,/*EMPTY*/,glProgramEnvParametersI4ivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [4]; ,/*EMPTY*/,glProgramEnvParametersI4uivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramLocalParameterI4iNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [4]; ,/*EMPTY*/,glProgramLocalParameterI4ivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramLocalParameterI4uiNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [4]; ,/*EMPTY*/,glProgramLocalParameterI4uivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [4]; ,/*EMPTY*/,glProgramLocalParametersI4ivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [4]; ,/*EMPTY*/,glProgramLocalParametersI4uivNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [0]; ,/*EMPTY*/,glProgramNamedParameter4dNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 0, var2, 0), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5), GLdouble, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [4];  GLdouble var3 [4]; ,/*EMPTY*/,glProgramNamedParameter4dvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 4, var2, 4), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [0]; ,/*EMPTY*/,glProgramNamedParameter4fNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 0, var2, 0), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [4];  GLfloat var3 [4]; ,/*EMPTY*/,glProgramNamedParameter4fvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 4, var2, 4), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramParameter4dNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLdouble var2 [4]; ,/*EMPTY*/,glProgramParameter4dvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramParameter4fNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [4]; ,/*EMPTY*/,glProgramParameter4fvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [4]; ,/*EMPTY*/,glProgramParameters4dvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [4]; ,/*EMPTY*/,glProgramParameters4fvNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5( GLfloat var4 [0]; ,/*EMPTY*/,glProgramPathFragmentInputGenNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [1]; ,/*EMPTY*/,glProgramSubroutineParametersuivNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1i64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform1i64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1ui64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform1ui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2i64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform2i64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2ui64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform2ui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3i64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3), GLint64EXT, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform3i64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3ui64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3), GLuint64EXT, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform3ui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4i64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3), GLint64EXT, duk_get_int(ctx, 4), GLint64EXT, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform4i64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4ui64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3), GLuint64EXT, duk_get_uint(ctx, 4), GLuint64EXT, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniform4ui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniformHandleui64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64 var3 [0]; ,/*EMPTY*/,glProgramUniformHandleui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniformui64NV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint64EXT var3 [0]; ,/*EMPTY*/,glProgramUniformui64vNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glProgramVertexLimitNV, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glRenderbufferStorageMultisampleCoverageNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei, var2, GLenum, duk_get_uint(ctx, 3), GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glRequestResidentProgramsNV, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glResolveDepthValuesNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glResumeTransformFeedbackNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSampleMaskIndexedNV, GLuint, duk_get_uint(ctx, 0), GLbitfield, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glSecondaryColor3hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glSecondaryColorFormatNV, GLint, duk_get_int(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSetFenceNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glStateCaptureNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glStencilFillPathNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glStencilStrokePathNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glStencilThenCoverFillPathNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glStencilThenCoverStrokePathNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSubpixelPrecisionBiasNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glTestFenceNV, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1hNV, GLhalfNV, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glTexCoord1hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glTexCoord2hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glTexCoord3hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glTexCoord4hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glTexCoordFormatNV, GLint, duk_get_int(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTexImage2DMultisampleCoverageNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei, var2, GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5, GLboolean, duk_get_boolean(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glTexImage3DMultisampleCoverageNV, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei, var2, GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5, GLsizei, var6, GLboolean, duk_get_boolean(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexRenderbufferNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glTextureBarrierNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glTextureImage2DMultisampleCoverageNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3, GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLboolean, duk_get_boolean(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTextureImage2DMultisampleNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5, GLboolean, duk_get_boolean(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glTextureImage3DMultisampleCoverageNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3, GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLsizei, var7, GLboolean, duk_get_boolean(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glTextureImage3DMultisampleNV, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5, GLsizei, var6, GLboolean, duk_get_boolean(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTrackMatrixNV, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLint var1 [0]; ,/*EMPTY*/,glTransformFeedbackAttribsNV, GLsizei, var0, const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var0 = duk_get_int(ctx, 0); GLsizei var2 = duk_get_int(ctx, 2);  GLint var1 [0];  GLint var3 [0]; ,/*EMPTY*/,glTransformFeedbackStreamAttribsNV, GLsizei, var0, const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [0]; ,/*EMPTY*/,glTransformFeedbackVaryingsNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [0]; ,/*EMPTY*/,glTransformPathNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1i64NV, GLint, duk_get_int(ctx, 0), GLint64EXT, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64EXT var2 [0]; ,/*EMPTY*/,glUniform1i64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1ui64NV, GLint, duk_get_int(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64EXT var2 [0]; ,/*EMPTY*/,glUniform1ui64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2i64NV, GLint, duk_get_int(ctx, 0), GLint64EXT, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64EXT var2 [0]; ,/*EMPTY*/,glUniform2i64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2ui64NV, GLint, duk_get_int(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64EXT var2 [0]; ,/*EMPTY*/,glUniform2ui64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3i64NV, GLint, duk_get_int(ctx, 0), GLint64EXT, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64EXT var2 [0]; ,/*EMPTY*/,glUniform3i64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3ui64NV, GLint, duk_get_int(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64EXT var2 [0]; ,/*EMPTY*/,glUniform3ui64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4i64NV, GLint, duk_get_int(ctx, 0), GLint64EXT, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3), GLint64EXT, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint64EXT var2 [0]; ,/*EMPTY*/,glUniform4i64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4ui64NV, GLint, duk_get_int(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3), GLuint64EXT, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64EXT var2 [0]; ,/*EMPTY*/,glUniform4ui64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniformHandleui64NV, GLint, duk_get_int(ctx, 0), GLuint64, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64 var2 [0]; ,/*EMPTY*/,glUniformHandleui64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniformui64NV, GLint, duk_get_int(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint64EXT var2 [0]; ,/*EMPTY*/,glUniformui64vNV, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glVDPAUFiniNV)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex2hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glVertex2hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex3hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glVertex3hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertex4hNV, GLhalfNV, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glVertex4hvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1dNV, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVertexAttrib1dvNV, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1fNV, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glVertexAttrib1fvNV, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1hNV, GLuint, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glVertexAttrib1hvNV, GLuint, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1sNV, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVertexAttrib1svNV, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2dNV, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glVertexAttrib2dvNV, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2fNV, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [2]; ,/*EMPTY*/,glVertexAttrib2fvNV, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2hNV, GLuint, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glVertexAttrib2hvNV, GLuint, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2sNV, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [2]; ,/*EMPTY*/,glVertexAttrib2svNV, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3dNV, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glVertexAttrib3dvNV, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3fNV, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glVertexAttrib3fvNV, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3hNV, GLuint, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glVertexAttrib3hvNV, GLuint, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3sNV, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glVertexAttrib3svNV, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4dNV, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glVertexAttrib4dvNV, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4fNV, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [4]; ,/*EMPTY*/,glVertexAttrib4fvNV, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4hNV, GLuint, duk_get_uint(ctx, 0), GLhalfNV, duk_get_uint(ctx, 1), GLhalfNV, duk_get_uint(ctx, 2), GLhalfNV, duk_get_uint(ctx, 3), GLhalfNV, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLhalfNV var1 [0]; ,/*EMPTY*/,glVertexAttrib4hvNV, GLuint, duk_get_uint(ctx, 0), const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4sNV, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3), GLshort, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glVertexAttrib4svNV, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4ubNV, GLuint, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLubyte, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [4]; ,/*EMPTY*/,glVertexAttrib4ubvNV, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glVertexAttribFormatNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glVertexAttribIFormatNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribL1i64NV, GLuint, duk_get_uint(ctx, 0), GLint64EXT, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL1i64vNV, GLuint, duk_get_uint(ctx, 0), const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribL1ui64NV, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL1ui64vNV, GLuint, duk_get_uint(ctx, 0), const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribL2i64NV, GLuint, duk_get_uint(ctx, 0), GLint64EXT, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL2i64vNV, GLuint, duk_get_uint(ctx, 0), const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribL2ui64NV, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL2ui64vNV, GLuint, duk_get_uint(ctx, 0), const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribL3i64NV, GLuint, duk_get_uint(ctx, 0), GLint64EXT, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL3i64vNV, GLuint, duk_get_uint(ctx, 0), const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribL3ui64NV, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL3ui64vNV, GLuint, duk_get_uint(ctx, 0), const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribL4i64NV, GLuint, duk_get_uint(ctx, 0), GLint64EXT, duk_get_int(ctx, 1), GLint64EXT, duk_get_int(ctx, 2), GLint64EXT, duk_get_int(ctx, 3), GLint64EXT, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL4i64vNV, GLuint, duk_get_uint(ctx, 0), const GLint64EXT *, duk_gl_get_GLint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribL4ui64NV, GLuint, duk_get_uint(ctx, 0), GLuint64EXT, duk_get_uint(ctx, 1), GLuint64EXT, duk_get_uint(ctx, 2), GLuint64EXT, duk_get_uint(ctx, 3), GLuint64EXT, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint64EXT var1 [0]; ,/*EMPTY*/,glVertexAttribL4ui64vNV, GLuint, duk_get_uint(ctx, 0), const GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glVertexAttribLFormatNV, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [1]; ,/*EMPTY*/,glVertexAttribs1dvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [1]; ,/*EMPTY*/,glVertexAttribs1fvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLhalfNV var2 [0]; ,/*EMPTY*/,glVertexAttribs1hvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLshort var2 [1]; ,/*EMPTY*/,glVertexAttribs1svNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLshort *, duk_gl_get_GLshort_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [2]; ,/*EMPTY*/,glVertexAttribs2dvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [2]; ,/*EMPTY*/,glVertexAttribs2fvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLhalfNV var2 [0]; ,/*EMPTY*/,glVertexAttribs2hvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLshort var2 [2]; ,/*EMPTY*/,glVertexAttribs2svNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLshort *, duk_gl_get_GLshort_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [3]; ,/*EMPTY*/,glVertexAttribs3dvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [3]; ,/*EMPTY*/,glVertexAttribs3fvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLhalfNV var2 [0]; ,/*EMPTY*/,glVertexAttribs3hvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLshort var2 [3]; ,/*EMPTY*/,glVertexAttribs3svNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLshort *, duk_gl_get_GLshort_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [4]; ,/*EMPTY*/,glVertexAttribs4dvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [4]; ,/*EMPTY*/,glVertexAttribs4fvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLhalfNV var2 [0]; ,/*EMPTY*/,glVertexAttribs4hvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLshort var2 [4]; ,/*EMPTY*/,glVertexAttribs4svNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLshort *, duk_gl_get_GLshort_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var2 [4]; ,/*EMPTY*/,glVertexAttribs4ubvNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glVertexFormatNV, GLint, duk_get_int(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glVertexWeighthNV, GLhalfNV, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLhalfNV var0 [0]; ,/*EMPTY*/,glVertexWeighthvNV, const GLhalfNV *, duk_gl_get_GLhalfNV_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(GLuint var1 [0]; GLuint64EXT var2 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); duk_gl_put_GLuint64EXT_array(ctx, 2, 0, var2, 0); ,glVideoCaptureNV, uint, GLuint, duk_get_uint(ctx, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), GLuint64EXT *, duk_gl_get_GLuint64EXT_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLdouble var3 [1]; ,/*EMPTY*/,glVideoCaptureStreamParameterdvNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [1]; ,/*EMPTY*/,glVideoCaptureStreamParameterfvNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glVideoCaptureStreamParameterivNV, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [0];  GLfloat var3 [0]; ,/*EMPTY*/,glWeightPathsNV, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 0, var3, 0))
 #endif /* DUK_GL_NV */
 
 #ifdef DUK_GL_OPENGL_1_1
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glAccum, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glAlphaFunc, GLenum, uint, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glArrayElement, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBegin, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindTexture, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendFunc, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCallList, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClear, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearAccum, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearColor, GLclampf, number, GLclampf, number, GLclampf, number, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearDepth, GLclampd, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearIndex, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearStencil, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3b, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3s, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3ub, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3ui, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3us, GLushort, uint, GLushort, uint, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4b, GLbyte, int, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4d, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4f, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4i, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4s, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4ub, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4ui, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4us, GLushort, uint, GLushort, uint, GLushort, uint, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColorMask, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glColorMaterial, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyPixels, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glCopyTexImage1D, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTexImage2D, GLenum, uint, GLint, int, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyTexSubImage1D, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTexSubImage2D, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCullFace, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDeleteLists, GLuint, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDepthFunc, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDepthMask, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRange, GLclampd, number, GLclampd, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisable, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableClientState, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDrawArrays, GLenum, uint, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDrawBuffer, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEdgeFlag, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnable, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableClientState, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEnd)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndList)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEvalCoord1d, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEvalCoord1f, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEvalCoord2d, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEvalCoord2f, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glEvalMesh1, GLenum, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glEvalMesh2, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEvalPoint1, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEvalPoint2, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glFinish)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glFlush)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFogf, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFogi, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFrontFace, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFrustum, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGenLists, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(glGetError, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glHint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexMask, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexd, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexf, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexi, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexs, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexub, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glInitNames)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsEnabled, boolean, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsList, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTexture, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLightModelf, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLightModeli, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glLightf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glLighti, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLineStipple, GLint, int, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLineWidth, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glListBase, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glLoadIdentity)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLoadName, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLogicOp, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMapGrid1d, GLint, int, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMapGrid1f, GLint, int, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glMapGrid2d, GLint, int, GLdouble, number, GLdouble, number, GLint, int, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glMapGrid2f, GLint, int, GLfloat, number, GLfloat, number, GLint, int, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMaterialf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMateriali, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMatrixMode, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glNewList, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3b, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3s, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glOrtho, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPassThrough, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelStoref, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelStorei, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelTransferf, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelTransferi, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelZoom, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPointSize, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPolygonMode, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPolygonOffset, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopAttrib)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopClientAttrib)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopMatrix)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopName)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPushAttrib, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPushClientAttrib, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPushMatrix)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPushName, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterPos2d, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterPos2f, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterPos2i, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterPos2s, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glRasterPos3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glRasterPos3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glRasterPos3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glRasterPos3s, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRasterPos4d, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRasterPos4f, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRasterPos4i, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRasterPos4s, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glReadBuffer, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRectd, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRectf, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRecti, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRects, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glRenderMode, int, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRotated, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRotatef, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glScaled, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glScalef, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glScissor, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glShadeModel, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glStencilFunc, GLenum, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glStencilMask, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glStencilOp, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1d, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1f, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1i, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1s, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2d, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2f, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2i, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2s, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3s, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4d, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4f, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4i, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4s, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexEnvf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexEnvi, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexGend, GLenum, uint, GLenum, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexGenf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexGeni, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexParameterf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexParameteri, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTranslated, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTranslatef, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex2d, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex2f, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex2i, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex2s, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex3s, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertex4d, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertex4f, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertex4i, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertex4s, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glViewport, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glAccum, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glAlphaFunc, GLenum, duk_get_uint(ctx, 0), GLclampf, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glAreTexturesResident, boolean, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glArrayElement, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBegin, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindTexture, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var0 = duk_get_int(ctx, 0); GLsizei var1 = duk_get_int(ctx, 1);  GLubyte var6 [0]; ,/*EMPTY*/,glBitmap, GLsizei, var0, GLsizei, var1, GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendFunc, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCallList, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClear, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearAccum, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearColor, GLclampf, duk_get_number(ctx, 0), GLclampf, duk_get_number(ctx, 1), GLclampf, duk_get_number(ctx, 2), GLclampf, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearDepth, GLclampd, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearIndex, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearStencil, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [0]; ,/*EMPTY*/,glClipPlane, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3b, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glColor3bv, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glColor3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glColor3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glColor3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glColor3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3ub, GLubyte, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [3]; ,/*EMPTY*/,glColor3ubv, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLuint var0 [3]; ,/*EMPTY*/,glColor3uiv, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glColor3us, GLushort, duk_get_uint(ctx, 0), GLushort, duk_get_uint(ctx, 1), GLushort, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLushort var0 [3]; ,/*EMPTY*/,glColor3usv, const GLushort *, duk_gl_get_GLushort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4b, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2), GLbyte, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glColor4bv, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [4]; ,/*EMPTY*/,glColor4dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [4]; ,/*EMPTY*/,glColor4fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [4]; ,/*EMPTY*/,glColor4iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [4]; ,/*EMPTY*/,glColor4sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4ub, GLubyte, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [4]; ,/*EMPTY*/,glColor4ubv, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLuint var0 [4]; ,/*EMPTY*/,glColor4uiv, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColor4us, GLushort, duk_get_uint(ctx, 0), GLushort, duk_get_uint(ctx, 1), GLushort, duk_get_uint(ctx, 2), GLushort, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLushort var0 [4]; ,/*EMPTY*/,glColor4usv, const GLushort *, duk_gl_get_GLushort_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glColorMask, GLboolean, duk_get_boolean(ctx, 0), GLboolean, duk_get_boolean(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLboolean, duk_get_boolean(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glColorMaterial, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glCopyPixels, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3, GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyTexImage1D, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLint, duk_get_int(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); ,/*EMPTY*/,glCopyTexImage2D, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLint, duk_get_int(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyTexSubImage1D, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glCopyTexSubImage2D, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLsizei, var7)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCullFace, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glDeleteLists, GLuint, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteTextures, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDepthFunc, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDepthMask, GLboolean, duk_get_boolean(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthRange, GLclampd, duk_get_number(ctx, 0), GLclampd, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDisable, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDisableClientState, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glDrawArrays, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDrawBuffer, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEdgeFlag, GLboolean, duk_get_boolean(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLboolean var0 [0]; ,/*EMPTY*/,glEdgeFlagv, const GLboolean *, duk_gl_get_GLboolean_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEnable, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEnableClientState, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEnd)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndList)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEvalCoord1d, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [1]; ,/*EMPTY*/,glEvalCoord1dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEvalCoord1f, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [1]; ,/*EMPTY*/,glEvalCoord1fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEvalCoord2d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glEvalCoord2dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEvalCoord2f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glEvalCoord2fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glEvalMesh1, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glEvalMesh2, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEvalPoint1, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEvalPoint2, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0); GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glFeedbackBuffer, GLsizei, var0, GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glFinish)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glFlush)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFogf, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glFogfv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFogi, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glFogiv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFrontFace, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glFrustum, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glGenLists, uint, GLsizei, var0)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenTextures, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLboolean var1 [0]; ,duk_gl_put_GLboolean_array(ctx, 1, 0, var1, 0); ,glGetBooleanv, GLenum, duk_get_uint(ctx, 0), GLboolean *, duk_gl_get_GLboolean_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLdouble var1 [0]; ,duk_gl_put_GLdouble_array(ctx, 1, 0, var1, 0); ,glGetClipPlane, GLenum, duk_get_uint(ctx, 0), GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLdouble var1 [0]; ,duk_gl_put_GLdouble_array(ctx, 1, 0, var1, 0); ,glGetDoublev, GLenum, duk_get_uint(ctx, 0), GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(/*EMPTY*/,/*EMPTY*/,glGetError, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [0]; ,duk_gl_put_GLfloat_array(ctx, 1, 0, var1, 0); ,glGetFloatv, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLint var1 [0]; ,duk_gl_put_GLint_array(ctx, 1, 0, var1, 0); ,glGetIntegerv, GLenum, duk_get_uint(ctx, 0), GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetLightfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetLightiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetMapdv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMapfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetMapiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMaterialfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetMaterialiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLfloat var1 [1]; ,duk_gl_put_GLfloat_array(ctx, 1, 1, var1, 1); ,glGetPixelMapfv, GLenum, duk_get_uint(ctx, 0), GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLuint var1 [1]; ,duk_gl_put_GLuint_array(ctx, 1, 1, var1, 1); ,glGetPixelMapuiv, GLenum, duk_get_uint(ctx, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLushort var1 [1]; ,duk_gl_put_GLushort_array(ctx, 1, 1, var1, 1); ,glGetPixelMapusv, GLenum, duk_get_uint(ctx, 0), GLushort *, duk_gl_get_GLushort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(GLubyte var0 [0]; ,duk_gl_put_GLubyte_array(ctx, 0, 0, var0, 0); ,glGetPolygonStipple, GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetTexEnvfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTexEnviv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetTexGendv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetTexGenfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTexGeniv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetTexLevelParameterfv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetTexLevelParameteriv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetTexParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTexParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glHint, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexMask, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexd, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [1]; ,/*EMPTY*/,glIndexdv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexf, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [1]; ,/*EMPTY*/,glIndexfv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexi, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [1]; ,/*EMPTY*/,glIndexiv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexs, GLshort, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [1]; ,/*EMPTY*/,glIndexsv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glIndexub, GLubyte, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [1]; ,/*EMPTY*/,glIndexubv, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glInitNames)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsEnabled, boolean, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsList, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsTexture, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glLightModelf, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glLightModelfv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glLightModeli, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glLightModeliv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glLightf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glLightfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glLighti, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glLightiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glLineStipple, GLint, duk_get_int(ctx, 0), GLushort, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glLineWidth, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glListBase, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glLoadIdentity)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glLoadMatrixd, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [0]; ,/*EMPTY*/,glLoadMatrixf, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glLoadName, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glLogicOp, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6( GLdouble var5 [0]; ,/*EMPTY*/,glMap1d, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 5, 0, var5, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6( GLfloat var5 [0]; ,/*EMPTY*/,glMap1f, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 5, 0, var5, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10( GLdouble var9 [0]; ,/*EMPTY*/,glMap2d, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLdouble, duk_get_number(ctx, 5), GLdouble, duk_get_number(ctx, 6), GLint, duk_get_int(ctx, 7), GLint, duk_get_int(ctx, 8), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 9, 0, var9, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10( GLfloat var9 [0]; ,/*EMPTY*/,glMap2f, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLint, duk_get_int(ctx, 7), GLint, duk_get_int(ctx, 8), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 9, 0, var9, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMapGrid1d, GLint, duk_get_int(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMapGrid1f, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glMapGrid2d, GLint, duk_get_int(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glMapGrid2f, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMaterialf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glMaterialfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMateriali, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glMaterialiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMatrixMode, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glMultMatrixd, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [0]; ,/*EMPTY*/,glMultMatrixf, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glNewList, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3b, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glNormal3bv, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glNormal3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glNormal3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glNormal3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNormal3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glNormal3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glOrtho, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPassThrough, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [1]; ,/*EMPTY*/,glPixelMapfv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [1]; ,/*EMPTY*/,glPixelMapuiv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLushort var2 [1]; ,/*EMPTY*/,glPixelMapusv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLushort *, duk_gl_get_GLushort_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelStoref, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelStorei, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelTransferf, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelTransferi, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPixelZoom, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPointSize, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPolygonMode, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPolygonOffset, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [0]; ,/*EMPTY*/,glPolygonStipple, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPopAttrib)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPopClientAttrib)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPopMatrix)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPopName)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0];  GLclampf var2 [0]; ,/*EMPTY*/,glPrioritizeTextures, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0), const GLclampf *, duk_gl_get_GLclampf_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPushAttrib, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPushClientAttrib, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPushMatrix)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPushName, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glRasterPos2d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glRasterPos2dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glRasterPos2f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glRasterPos2fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glRasterPos2i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [2]; ,/*EMPTY*/,glRasterPos2iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glRasterPos2s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [2]; ,/*EMPTY*/,glRasterPos2sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glRasterPos3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glRasterPos3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glRasterPos3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glRasterPos3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glRasterPos3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glRasterPos3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glRasterPos3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glRasterPos3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRasterPos4d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [4]; ,/*EMPTY*/,glRasterPos4dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRasterPos4f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [4]; ,/*EMPTY*/,glRasterPos4fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRasterPos4i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [4]; ,/*EMPTY*/,glRasterPos4iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRasterPos4s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [4]; ,/*EMPTY*/,glRasterPos4sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glReadBuffer, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRectd, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var0 [1];  GLdouble var1 [1]; ,/*EMPTY*/,glRectdv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 1, var0, 1), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRectf, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var0 [1];  GLfloat var1 [1]; ,/*EMPTY*/,glRectfv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRecti, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var0 [1];  GLint var1 [1]; ,/*EMPTY*/,glRectiv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 1, var0, 1), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRects, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var0 [1];  GLshort var1 [1]; ,/*EMPTY*/,glRectsv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 1, var0, 1), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glRenderMode, int, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRotated, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glRotatef, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glScaled, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glScalef, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glScissor, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glSelectBuffer, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glShadeModel, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glStencilFunc, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glStencilMask, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glStencilOp, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1d, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [1]; ,/*EMPTY*/,glTexCoord1dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1f, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [1]; ,/*EMPTY*/,glTexCoord1fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1i, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [1]; ,/*EMPTY*/,glTexCoord1iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glTexCoord1s, GLshort, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [1]; ,/*EMPTY*/,glTexCoord1sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glTexCoord2dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glTexCoord2fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [2]; ,/*EMPTY*/,glTexCoord2iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoord2s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [2]; ,/*EMPTY*/,glTexCoord2sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glTexCoord3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glTexCoord3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glTexCoord3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexCoord3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glTexCoord3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [4]; ,/*EMPTY*/,glTexCoord4dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [4]; ,/*EMPTY*/,glTexCoord4fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [4]; ,/*EMPTY*/,glTexCoord4iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glTexCoord4s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [4]; ,/*EMPTY*/,glTexCoord4sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexEnvf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glTexEnvfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexEnvi, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTexEnviv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexGend, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLdouble var2 [1]; ,/*EMPTY*/,glTexGendv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexGenf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glTexGenfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexGeni, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTexGeniv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexParameterf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glTexParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexParameteri, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTexParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTranslated, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTranslatef, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex2d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glVertex2dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex2f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glVertex2fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex2i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [2]; ,/*EMPTY*/,glVertex2iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertex2s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [2]; ,/*EMPTY*/,glVertex2sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glVertex3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glVertex3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glVertex3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertex3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glVertex3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertex4d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [4]; ,/*EMPTY*/,glVertex4dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertex4f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [4]; ,/*EMPTY*/,glVertex4fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertex4i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [4]; ,/*EMPTY*/,glVertex4iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertex4s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [4]; ,/*EMPTY*/,glVertex4sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 4, var0, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glViewport, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3)
 #endif /* DUK_GL_OPENGL_1_1 */
 
 #ifdef DUK_GL_OPENGL_1_2
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendColor, GLclampf, number, GLclampf, number, GLclampf, number, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBlendEquation, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameterf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameteri, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorSubTable, GLenum, uint, GLsizei, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorTable, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyConvolutionFilter1D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyConvolutionFilter2D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTexSubImage3D, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glHistogram, GLenum, uint, GLsizei, int, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMinmax, GLenum, uint, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetHistogram, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetMinmax, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendColor, GLclampf, duk_get_number(ctx, 0), GLclampf, duk_get_number(ctx, 1), GLclampf, duk_get_number(ctx, 2), GLclampf, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBlendEquation, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glColorTableParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glColorTableParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameterf, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glConvolutionParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glConvolutionParameteri, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glConvolutionParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyColorSubTable, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyColorTable, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyConvolutionFilter1D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyConvolutionFilter2D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var7 = duk_get_int(ctx, 7); GLsizei var8 = duk_get_int(ctx, 8); ,/*EMPTY*/,glCopyTexSubImage3D, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLsizei, var7, GLsizei, var8)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetConvolutionParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetConvolutionParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetHistogramParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetHistogramParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMinmaxParameterfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetMinmaxParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glHistogram, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLboolean, duk_get_boolean(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMinmax, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glResetHistogram, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glResetMinmax, GLenum, duk_get_uint(ctx, 0))
 #endif /* DUK_GL_OPENGL_1_2 */
 
 #ifdef DUK_GL_OPENGL_1_3
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glActiveTexture, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClientActiveTexture, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1d, GLenum, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1f, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1i, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1s, GLenum, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2d, GLenum, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2f, GLenum, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2i, GLenum, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2s, GLenum, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3d, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3f, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3i, GLenum, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3s, GLenum, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4d, GLenum, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4f, GLenum, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4i, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4s, GLenum, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleCoverage, GLfloat, number, GLboolean, boolean)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glActiveTexture, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClientActiveTexture, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glLoadTransposeMatrixd, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [0]; ,/*EMPTY*/,glLoadTransposeMatrixf, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glMultTransposeMatrixd, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [0]; ,/*EMPTY*/,glMultTransposeMatrixf, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1d, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glMultiTexCoord1dv, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1f, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glMultiTexCoord1fv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1i, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glMultiTexCoord1iv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord1s, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glMultiTexCoord1sv, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2d, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glMultiTexCoord2dv, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2f, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [2]; ,/*EMPTY*/,glMultiTexCoord2fv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2i, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [2]; ,/*EMPTY*/,glMultiTexCoord2iv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord2s, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [2]; ,/*EMPTY*/,glMultiTexCoord2sv, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3d, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glMultiTexCoord3dv, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3f, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glMultiTexCoord3fv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3i, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [3]; ,/*EMPTY*/,glMultiTexCoord3iv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord3s, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glMultiTexCoord3sv, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4d, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glMultiTexCoord4dv, GLenum, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4f, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [4]; ,/*EMPTY*/,glMultiTexCoord4fv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4i, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glMultiTexCoord4iv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glMultiTexCoord4s, GLenum, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3), GLshort, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glMultiTexCoord4sv, GLenum, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSampleCoverage, GLfloat, duk_get_number(ctx, 0), GLboolean, duk_get_boolean(ctx, 1))
 #endif /* DUK_GL_OPENGL_1_3 */
 
 #ifdef DUK_GL_OPENGL_1_4
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendColor, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBlendEquation, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendFuncSeparate, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFogCoordd, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFogCoordf, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPointParameterf, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPointParameteri, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3b, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3s, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3ub, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3ui, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSecondaryColor3us, GLushort, uint, GLushort, uint, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2d, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2f, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2i, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glWindowPos2s, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3d, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3f, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glWindowPos3s, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendColor, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBlendEquation, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBlendFuncSeparate, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFogCoordd, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [1]; ,/*EMPTY*/,glFogCoorddv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFogCoordf, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [1]; ,/*EMPTY*/,glFogCoordfv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3);  GLint var1 [0];  GLsizei var2 [0]; ,/*EMPTY*/,glMultiDrawArrays, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0), const GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPointParameterf, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glPointParameterfv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPointParameteri, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glPointParameteriv, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3b, GLbyte, duk_get_int(ctx, 0), GLbyte, duk_get_int(ctx, 1), GLbyte, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLbyte var0 [0]; ,/*EMPTY*/,glSecondaryColor3bv, const GLbyte *, duk_gl_get_GLbyte_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glSecondaryColor3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glSecondaryColor3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glSecondaryColor3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glSecondaryColor3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3ub, GLubyte, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [3]; ,/*EMPTY*/,glSecondaryColor3ubv, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLuint var0 [3]; ,/*EMPTY*/,glSecondaryColor3uiv, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSecondaryColor3us, GLushort, duk_get_uint(ctx, 0), GLushort, duk_get_uint(ctx, 1), GLushort, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLushort var0 [3]; ,/*EMPTY*/,glSecondaryColor3usv, const GLushort *, duk_gl_get_GLushort_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [2]; ,/*EMPTY*/,glWindowPos2dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [2]; ,/*EMPTY*/,glWindowPos2fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [2]; ,/*EMPTY*/,glWindowPos2iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glWindowPos2s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [2]; ,/*EMPTY*/,glWindowPos2sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 2, var0, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3d, GLdouble, duk_get_number(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [3]; ,/*EMPTY*/,glWindowPos3dv, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3f, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLfloat var0 [3]; ,/*EMPTY*/,glWindowPos3fv, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLint var0 [3]; ,/*EMPTY*/,glWindowPos3iv, const GLint *, duk_gl_get_GLint_array(ctx, 0, 3, var0, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glWindowPos3s, GLshort, duk_get_int(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLshort var0 [3]; ,/*EMPTY*/,glWindowPos3sv, const GLshort *, duk_gl_get_GLshort_array(ctx, 0, 3, var0, 3))
 #endif /* DUK_GL_OPENGL_1_4 */
 
 #ifdef DUK_GL_OPENGL_1_5
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBeginQuery, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindBuffer, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEndQuery, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsBuffer, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsQuery, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glUnmapBuffer, boolean, GLenum, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBeginQuery, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindBuffer, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteBuffers, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteQueries, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEndQuery, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenBuffers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenQueries, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetBufferParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetQueryObjectiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetQueryObjectuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetQueryiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsBuffer, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsQuery, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glUnmapBuffer, boolean, GLenum, duk_get_uint(ctx, 0))
 #endif /* DUK_GL_OPENGL_1_5 */
 
 #ifdef DUK_GL_OPENGL_2_0
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glAttachShader, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindAttribLocation, GLuint, uint, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationSeparate, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glCompileShader, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(glCreateProgram, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glCreateShader, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeleteProgram, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeleteShader, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDetachShader, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDisableVertexAttribArray, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEnableVertexAttribArray, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetAttribLocation, int, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetUniformLocation, int, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsProgram, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsShader, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLinkProgram, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glStencilFuncSeparate, GLenum, uint, GLenum, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glStencilMaskSeparate, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glStencilOpSeparate, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1f, GLint, int, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1i, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2f, GLint, int, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2i, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3f, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3i, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4f, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4i, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glUseProgram, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glValidateProgram, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1d, GLuint, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1f, GLuint, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttrib1s, GLuint, uint, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2d, GLuint, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2f, GLuint, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttrib2s, GLuint, uint, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3d, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3f, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttrib3s, GLuint, uint, GLshort, int, GLshort, int, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4Nub, GLuint, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4d, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4f, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttrib4s, GLuint, uint, GLshort, int, GLshort, int, GLshort, int, GLshort, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glAttachShader, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindAttribLocation, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendEquationSeparate, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glCompileShader, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(/*EMPTY*/,/*EMPTY*/,glCreateProgram, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glCreateShader, uint, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDeleteProgram, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDeleteShader, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDetachShader, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDisableVertexAttribArray, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLenum var1 [0]; ,/*EMPTY*/,glDrawBuffers, GLsizei, var0, const GLenum *, duk_gl_get_GLenum_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glEnableVertexAttribArray, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLint var4 [0]; GLenum var5 [0]; GLchar var6 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLint_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLchar_array(ctx, 6, 0, var6, 0); ,glGetActiveAttrib, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLint *, duk_gl_get_GLint_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLint var4 [0]; GLenum var5 [0]; GLchar var6 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLint_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLchar_array(ctx, 6, 0, var6, 0); ,glGetActiveUniform, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLint *, duk_gl_get_GLint_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var2 [0]; GLuint var3 [0]; ,duk_gl_put_GLsizei_array(ctx, 2, 0, var2, 0); duk_gl_put_GLuint_array(ctx, 3, 0, var3, 0); ,glGetAttachedShaders, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetAttribLocation, int, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var2 [0]; GLchar var3 [0]; ,duk_gl_put_GLsizei_array(ctx, 2, 0, var2, 0); duk_gl_put_GLchar_array(ctx, 3, 0, var3, 0); ,glGetProgramInfoLog, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetProgramiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var2 [0]; GLchar var3 [0]; ,duk_gl_put_GLsizei_array(ctx, 2, 0, var2, 0); duk_gl_put_GLchar_array(ctx, 3, 0, var3, 0); ,glGetShaderInfoLog, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var2 [0]; GLchar var3 [0]; ,duk_gl_put_GLsizei_array(ctx, 2, 0, var2, 0); duk_gl_put_GLchar_array(ctx, 3, 0, var3, 0); ,glGetShaderSource, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetShaderiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetUniformLocation, int, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetUniformfv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetUniformiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribdv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribfv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsProgram, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsShader, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glLinkProgram, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLint var3 [0]; ,/*EMPTY*/,glShaderSource, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLchar * const *, duk_get_string(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glStencilFuncSeparate, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glStencilMaskSeparate, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glStencilOpSeparate, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1f, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [1]; ,/*EMPTY*/,glUniform1fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [1]; ,/*EMPTY*/,glUniform1iv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2f, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [2]; ,/*EMPTY*/,glUniform2fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [2]; ,/*EMPTY*/,glUniform2iv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3f, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [3]; ,/*EMPTY*/,glUniform3fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [3]; ,/*EMPTY*/,glUniform3iv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4f, GLint, duk_get_int(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [4]; ,/*EMPTY*/,glUniform4fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4i, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [4]; ,/*EMPTY*/,glUniform4iv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [4]; ,/*EMPTY*/,glUniformMatrix2fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [9]; ,/*EMPTY*/,glUniformMatrix3fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 9, var3, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [16]; ,/*EMPTY*/,glUniformMatrix4fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 16, var3, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glUseProgram, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glValidateProgram, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVertexAttrib1dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1f, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glVertexAttrib1fv, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttrib1s, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVertexAttrib1sv, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glVertexAttrib2dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2f, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [2]; ,/*EMPTY*/,glVertexAttrib2fv, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttrib2s, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [2]; ,/*EMPTY*/,glVertexAttrib2sv, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glVertexAttrib3dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3f, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [3]; ,/*EMPTY*/,glVertexAttrib3fv, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttrib3s, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [3]; ,/*EMPTY*/,glVertexAttrib3sv, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVertexAttrib4Nbv, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glVertexAttrib4Niv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [1]; ,/*EMPTY*/,glVertexAttrib4Nsv, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4Nub, GLuint, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLubyte, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [1]; ,/*EMPTY*/,glVertexAttrib4Nubv, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glVertexAttrib4Nuiv, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [1]; ,/*EMPTY*/,glVertexAttrib4Nusv, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVertexAttrib4bv, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glVertexAttrib4dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4f, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [4]; ,/*EMPTY*/,glVertexAttrib4fv, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glVertexAttrib4iv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttrib4s, GLuint, duk_get_uint(ctx, 0), GLshort, duk_get_int(ctx, 1), GLshort, duk_get_int(ctx, 2), GLshort, duk_get_int(ctx, 3), GLshort, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glVertexAttrib4sv, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [4]; ,/*EMPTY*/,glVertexAttrib4ubv, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glVertexAttrib4uiv, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [4]; ,/*EMPTY*/,glVertexAttrib4usv, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 4, var1, 4))
 #endif /* DUK_GL_OPENGL_2_0 */
 
+#ifdef DUK_GL_OPENGL_2_1
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [6]; ,/*EMPTY*/,glUniformMatrix2x3fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 6, var3, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [8]; ,/*EMPTY*/,glUniformMatrix2x4fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 8, var3, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [6]; ,/*EMPTY*/,glUniformMatrix3x2fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 6, var3, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [12]; ,/*EMPTY*/,glUniformMatrix3x4fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 12, var3, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [8]; ,/*EMPTY*/,glUniformMatrix4x2fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 8, var3, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var3 [12]; ,/*EMPTY*/,glUniformMatrix4x3fv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 12, var3, 12))
+#endif /* DUK_GL_OPENGL_2_1 */
+
 #ifdef DUK_GL_OPENGL_3_0
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBeginConditionalRender, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginTransformFeedback, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindBufferBase, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBindFragDataLocation, GLuint, uint, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindFramebuffer, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindRenderbuffer, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBindVertexArray, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glBlitFramebuffer, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLbitfield, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glCheckFramebufferStatus, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glClampColor, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearBufferfi, GLenum, uint, GLint, int, GLfloat, number, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glColorMaski, GLuint, uint, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisablei, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnablei, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndConditionalRender)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndTransformFeedback)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glFramebufferRenderbuffer, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTexture1D, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTexture2D, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFramebufferTexture3D, GLenum, uint, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glFramebufferTextureLayer, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGenerateMipmap, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetFragDataLocation, int, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsEnabledi, boolean, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsFramebuffer, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsRenderbuffer, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsVertexArray, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRenderbufferStorage, GLenum, uint, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glRenderbufferStorageMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1ui, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2ui, GLint, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3ui, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4ui, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribI1i, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribI1ui, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribI2i, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribI2ui, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribI3i, GLuint, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribI3ui, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribI4i, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribI4ui, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBeginConditionalRender, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBeginTransformFeedback, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindBufferBase, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBindFragDataLocation, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindFramebuffer, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindRenderbuffer, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBindVertexArray, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(/*EMPTY*/,/*EMPTY*/,glBlitFramebuffer, GLint, duk_get_int(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLint, duk_get_int(ctx, 7), GLbitfield, duk_get_uint(ctx, 8), GLenum, duk_get_uint(ctx, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glCheckFramebufferStatus, uint, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glClampColor, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearBufferfi, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glClearBufferfv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glClearBufferiv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [1]; ,/*EMPTY*/,glClearBufferuiv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glColorMaski, GLuint, duk_get_uint(ctx, 0), GLboolean, duk_get_boolean(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLboolean, duk_get_boolean(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteFramebuffers, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteRenderbuffers, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteVertexArrays, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisablei, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnablei, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndConditionalRender)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glEndTransformFeedback)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glFramebufferRenderbuffer, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture1D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture2D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture3D, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glFramebufferTextureLayer, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenFramebuffers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenRenderbuffers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenVertexArrays, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGenerateMipmap, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLboolean var2 [0]; ,duk_gl_put_GLboolean_array(ctx, 2, 0, var2, 0); ,glGetBooleani_v, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLboolean *, duk_gl_get_GLboolean_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetFragDataLocation, int, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetFramebufferAttachmentParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); ,glGetIntegeri_v, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetRenderbufferParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTexParameterIiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetTexParameterIuiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var3 [0]; GLsizei var4 [0]; GLenum var5 [0]; GLchar var6 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLsizei_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLchar_array(ctx, 6, 0, var6, 0); ,glGetTransformFeedbackVarying, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 6, 0, var6, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetUniformuiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribIiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribIuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glIsEnabledi, boolean, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsFramebuffer, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsRenderbuffer, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsVertexArray, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glRenderbufferStorage, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glRenderbufferStorageMultisample, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTexParameterIiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [1]; ,/*EMPTY*/,glTexParameterIuiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glTransformFeedbackVaryings, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLchar * const *, duk_get_string(ctx, 2), GLenum, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1ui, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [1]; ,/*EMPTY*/,glUniform1uiv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2ui, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [2]; ,/*EMPTY*/,glUniform2uiv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3ui, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [3]; ,/*EMPTY*/,glUniform3uiv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4ui, GLint, duk_get_int(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [4]; ,/*EMPTY*/,glUniform4uiv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribI1i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glVertexAttribI1iv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribI1ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glVertexAttribI1uiv, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribI2i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [2]; ,/*EMPTY*/,glVertexAttribI2iv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribI2ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [2]; ,/*EMPTY*/,glVertexAttribI2uiv, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribI3i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [3]; ,/*EMPTY*/,glVertexAttribI3iv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribI3ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glVertexAttribI3uiv, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLbyte var1 [0]; ,/*EMPTY*/,glVertexAttribI4bv, GLuint, duk_get_uint(ctx, 0), const GLbyte *, duk_gl_get_GLbyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribI4i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [4]; ,/*EMPTY*/,glVertexAttribI4iv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLshort var1 [4]; ,/*EMPTY*/,glVertexAttribI4sv, GLuint, duk_get_uint(ctx, 0), const GLshort *, duk_gl_get_GLshort_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var1 [4]; ,/*EMPTY*/,glVertexAttribI4ubv, GLuint, duk_get_uint(ctx, 0), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribI4ui, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glVertexAttribI4uiv, GLuint, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLushort var1 [4]; ,/*EMPTY*/,glVertexAttribI4usv, GLuint, duk_get_uint(ctx, 0), const GLushort *, duk_gl_get_GLushort_array(ctx, 1, 4, var1, 4))
 #endif /* DUK_GL_OPENGL_3_0 */
 
 #ifdef DUK_GL_OPENGL_3_1
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawArraysInstanced, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetUniformBlockIndex, uint, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPrimitiveRestartIndex, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexBuffer, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniformBlockBinding, GLuint, uint, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawArraysInstanced, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLchar var4 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 4, 0, var4, 0); ,glGetActiveUniformBlockName, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetActiveUniformBlockiv, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLchar var4 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 4, 0, var4, 0); ,glGetActiveUniformName, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [1]; GLint var4 [1]; ,duk_gl_put_GLint_array(ctx, 4, 1, var4, 1); ,glGetActiveUniformsiv, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1), GLenum, duk_get_uint(ctx, 3), GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetUniformBlockIndex, uint, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLuint var3 [0]; ,duk_gl_put_GLuint_array(ctx, 3, 0, var3, 0); ,glGetUniformIndices, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLchar * const *, duk_get_string(ctx, 2), GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPrimitiveRestartIndex, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTexBuffer, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniformBlockBinding, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
 #endif /* DUK_GL_OPENGL_3_1 */
 
 #ifdef DUK_GL_OPENGL_3_2
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glFramebufferTexture, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glProvokingVertex, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleMaski, GLuint, uint, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTexImage2DMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTexImage3DMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glFramebufferTexture, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64 var2 [0]; ,duk_gl_put_GLint64_array(ctx, 2, 0, var2, 0); ,glGetBufferParameteri64v, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64 var2 [0]; ,duk_gl_put_GLint64_array(ctx, 2, 0, var2, 0); ,glGetInteger64i_v, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLint64 var1 [0]; ,duk_gl_put_GLint64_array(ctx, 1, 0, var1, 0); ,glGetInteger64v, GLenum, duk_get_uint(ctx, 0), GLint64 *, duk_gl_get_GLint64_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetMultisamplefv, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glProvokingVertex, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSampleMaski, GLuint, duk_get_uint(ctx, 0), GLbitfield, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glTexImage2DMultisample, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLboolean, duk_get_boolean(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTexImage3DMultisample, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLsizei, var5, GLboolean, duk_get_boolean(ctx, 6))
 #endif /* DUK_GL_OPENGL_3_2 */
 
 #ifdef DUK_GL_OPENGL_3_3
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBindFragDataLocationIndexed, GLuint, uint, GLuint, uint, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindSampler, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glColorP3ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glColorP4ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glGetFragDataIndex, int, GLuint, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsSampler, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoordP1ui, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoordP2ui, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoordP3ui, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoordP4ui, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glNormalP3ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glQueryCounter, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSamplerParameterf, GLuint, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glSamplerParameteri, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSecondaryColorP3ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoordP1ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoordP2ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoordP3ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoordP4ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribDivisor, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribP1ui, GLuint, uint, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribP2ui, GLuint, uint, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribP3ui, GLuint, uint, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribP4ui, GLuint, uint, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexP2ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexP3ui, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexP4ui, GLenum, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glBindFragDataLocationIndexed, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), const GLchar *, duk_get_string(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindSampler, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glColorP3ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glColorP3uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glColorP4ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glColorP4uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteSamplers, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenSamplers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glGetFragDataIndex, int, GLuint, duk_get_uint(ctx, 0), const GLchar *, duk_get_string(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64 var2 [0]; ,duk_gl_put_GLint64_array(ctx, 2, 0, var2, 0); ,glGetQueryObjecti64v, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint64 var2 [0]; ,duk_gl_put_GLuint64_array(ctx, 2, 0, var2, 0); ,glGetQueryObjectui64v, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint64 *, duk_gl_get_GLuint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetSamplerParameterIiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetSamplerParameterIuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetSamplerParameterfv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetSamplerParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsSampler, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoordP1ui, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [1]; ,/*EMPTY*/,glMultiTexCoordP1uiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoordP2ui, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [2]; ,/*EMPTY*/,glMultiTexCoordP2uiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoordP3ui, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [3]; ,/*EMPTY*/,glMultiTexCoordP3uiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glMultiTexCoordP4ui, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [4]; ,/*EMPTY*/,glMultiTexCoordP4uiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glNormalP3ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glNormalP3uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glQueryCounter, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glSamplerParameterIiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [1]; ,/*EMPTY*/,glSamplerParameterIuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSamplerParameterf, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glSamplerParameterfv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glSamplerParameteri, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glSamplerParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSecondaryColorP3ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glSecondaryColorP3uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoordP1ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [1]; ,/*EMPTY*/,glTexCoordP1uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoordP2ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [2]; ,/*EMPTY*/,glTexCoordP2uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoordP3ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glTexCoordP3uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glTexCoordP4ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glTexCoordP4uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribDivisor, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribP1ui, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [1]; ,/*EMPTY*/,glVertexAttribP1uiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribP2ui, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [2]; ,/*EMPTY*/,glVertexAttribP2uiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribP3ui, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [3]; ,/*EMPTY*/,glVertexAttribP3uiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribP4ui, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [4]; ,/*EMPTY*/,glVertexAttribP4uiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLboolean, duk_get_boolean(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexP2ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [2]; ,/*EMPTY*/,glVertexP2uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexP3ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [3]; ,/*EMPTY*/,glVertexP3uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexP4ui, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var1 [4]; ,/*EMPTY*/,glVertexP4uiv, GLenum, duk_get_uint(ctx, 0), const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 4, var1, 4))
 #endif /* DUK_GL_OPENGL_3_3 */
 
 #ifdef DUK_GL_OPENGL_4_0
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBeginQueryIndexed, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindTransformFeedback, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendEquationSeparatei, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationi, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glBlendFuncSeparatei, GLuint, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendFunci, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDrawTransformFeedback, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDrawTransformFeedbackStream, GLenum, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEndQueryIndexed, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetSubroutineIndex, uint, GLuint, uint, GLenum, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetSubroutineUniformLocation, int, GLuint, uint, GLenum, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsTransformFeedback, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMinSampleShading, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPatchParameteri, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPauseTransformFeedback)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glResumeTransformFeedback)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glUniform1d, GLint, int, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUniform2d, GLint, int, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glUniform3d, GLint, int, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glUniform4d, GLint, int, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBeginQueryIndexed, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindTransformFeedback, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBlendEquationSeparatei, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBlendEquationi, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glBlendFuncSeparatei, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLenum, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glBlendFunci, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteTransformFeedbacks, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDrawTransformFeedback, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glDrawTransformFeedbackStream, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEndQueryIndexed, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenTransformFeedbacks, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var4 [0]; GLchar var5 [0]; ,duk_gl_put_GLsizei_array(ctx, 4, 0, var4, 0); duk_gl_put_GLchar_array(ctx, 5, 0, var5, 0); ,glGetActiveSubroutineName, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 5, 0, var5, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var4 [0]; GLchar var5 [0]; ,duk_gl_put_GLsizei_array(ctx, 4, 0, var4, 0); duk_gl_put_GLchar_array(ctx, 5, 0, var5, 0); ,glGetActiveSubroutineUniformName, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 5, 0, var5, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLint var4 [1]; ,duk_gl_put_GLint_array(ctx, 4, 1, var4, 1); ,glGetActiveSubroutineUniformiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetProgramStageiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetQueryIndexediv, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glGetSubroutineIndex, uint, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glGetSubroutineUniformLocation, int, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetUniformSubroutineuiv, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetUniformdv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsTransformFeedback, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMinSampleShading, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glPatchParameterfv, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glPatchParameteri, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPauseTransformFeedback)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glResumeTransformFeedback)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glUniform1d, GLint, duk_get_int(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [1]; ,/*EMPTY*/,glUniform1dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUniform2d, GLint, duk_get_int(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [2]; ,/*EMPTY*/,glUniform2dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 2, var2, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glUniform3d, GLint, duk_get_int(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [3]; ,/*EMPTY*/,glUniform3dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glUniform4d, GLint, duk_get_int(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [4]; ,/*EMPTY*/,glUniform4dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 4, var2, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [4]; ,/*EMPTY*/,glUniformMatrix2dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [6]; ,/*EMPTY*/,glUniformMatrix2x3dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 6, var3, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [8]; ,/*EMPTY*/,glUniformMatrix2x4dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 8, var3, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [9]; ,/*EMPTY*/,glUniformMatrix3dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 9, var3, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [6]; ,/*EMPTY*/,glUniformMatrix3x2dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 6, var3, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [12]; ,/*EMPTY*/,glUniformMatrix3x4dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 12, var3, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [16]; ,/*EMPTY*/,glUniformMatrix4dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 16, var3, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [8]; ,/*EMPTY*/,glUniformMatrix4x2dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 8, var3, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var3 [12]; ,/*EMPTY*/,glUniformMatrix4x3dv, GLint, duk_get_int(ctx, 0), GLsizei, var1, GLboolean, duk_get_boolean(ctx, 2), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 12, var3, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [1]; ,/*EMPTY*/,glUniformSubroutinesuiv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
 #endif /* DUK_GL_OPENGL_4_0 */
 
 #ifdef DUK_GL_OPENGL_4_1
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glActiveShaderProgram, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBindProgramPipeline, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearDepthf, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDepthRangeIndexed, GLuint, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRangef, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsProgramPipeline, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramParameteri, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1d, GLuint, uint, GLint, int, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1f, GLuint, uint, GLint, int, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1i, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glProgramUniform1ui, GLuint, uint, GLint, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2d, GLuint, uint, GLint, int, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2f, GLuint, uint, GLint, int, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2i, GLuint, uint, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glProgramUniform2ui, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3d, GLuint, uint, GLint, int, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3f, GLuint, uint, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3i, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glProgramUniform3ui, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4d, GLuint, uint, GLint, int, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4f, GLuint, uint, GLint, int, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4i, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glProgramUniform4ui, GLuint, uint, GLint, int, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glReleaseShaderCompiler)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glScissorIndexed, GLuint, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glUseProgramStages, GLuint, uint, GLbitfield, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glValidateProgramPipeline, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribL1d, GLuint, uint, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribL2d, GLuint, uint, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribL3d, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribL4d, GLuint, uint, GLdouble, number, GLdouble, number, GLdouble, number, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glViewportIndexedf, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glActiveShaderProgram, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glBindProgramPipeline, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glClearDepthf, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glCreateShaderProgramv, uint, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLchar * const *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0);  GLuint var1 [0]; ,/*EMPTY*/,glDeleteProgramPipelines, GLsizei, var0, const GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLdouble var2 [0]; ,/*EMPTY*/,glDepthRangeArrayv, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glDepthRangeIndexed, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDepthRangef, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glGenProgramPipelines, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [0]; ,duk_gl_put_GLdouble_array(ctx, 2, 0, var2, 0); ,glGetDoublei_v, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [0]; ,duk_gl_put_GLfloat_array(ctx, 2, 0, var2, 0); ,glGetFloati_v, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var2 = duk_get_DETERMINE(ctx, 2); GLsizei var2 [0]; GLchar var3 [0]; ,duk_gl_put_GLsizei_array(ctx, 2, 0, var2, 0); duk_gl_put_GLchar_array(ctx, 3, 0, var3, 0); ,glGetProgramPipelineInfoLog, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLsizei *, duk_gl_get_GLsizei_array(ctx, 2, 0, var2, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetProgramPipelineiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var2 [0]; GLint var3 [0]; ,duk_gl_put_GLint_array(ctx, 2, 0, var2, 0); duk_gl_put_GLint_array(ctx, 3, 0, var3, 0); ,glGetShaderPrecisionFormat, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0), GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLdouble var2 [1]; ,duk_gl_put_GLdouble_array(ctx, 2, 1, var2, 1); ,glGetVertexAttribLdv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLdouble *, duk_gl_get_GLdouble_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsProgramPipeline, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramParameteri, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1d, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [1]; ,/*EMPTY*/,glProgramUniform1dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1f, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [1]; ,/*EMPTY*/,glProgramUniform1fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [1]; ,/*EMPTY*/,glProgramUniform1iv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glProgramUniform1ui, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [1]; ,/*EMPTY*/,glProgramUniform1uiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2d, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [2]; ,/*EMPTY*/,glProgramUniform2dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2f, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [2]; ,/*EMPTY*/,glProgramUniform2fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [2]; ,/*EMPTY*/,glProgramUniform2iv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glProgramUniform2ui, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [2]; ,/*EMPTY*/,glProgramUniform2uiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 2, var3, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3d, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [3]; ,/*EMPTY*/,glProgramUniform3dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3f, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [3]; ,/*EMPTY*/,glProgramUniform3fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [3]; ,/*EMPTY*/,glProgramUniform3iv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glProgramUniform3ui, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [3]; ,/*EMPTY*/,glProgramUniform3uiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4d, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4), GLdouble, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var3 [4]; ,/*EMPTY*/,glProgramUniform4dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4f, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var3 [4]; ,/*EMPTY*/,glProgramUniform4fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4i, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLint var3 [4]; ,/*EMPTY*/,glProgramUniform4iv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLint *, duk_gl_get_GLint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glProgramUniform4ui, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [4]; ,/*EMPTY*/,glProgramUniform4uiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [4]; ,/*EMPTY*/,glProgramUniformMatrix2dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [4]; ,/*EMPTY*/,glProgramUniformMatrix2fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 4, var4, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix2x3dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix2x3fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix2x4dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix2x4fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [9]; ,/*EMPTY*/,glProgramUniformMatrix3dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 9, var4, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [9]; ,/*EMPTY*/,glProgramUniformMatrix3fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 9, var4, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix3x2dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [6]; ,/*EMPTY*/,glProgramUniformMatrix3x2fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 6, var4, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix3x4dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix3x4fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [16]; ,/*EMPTY*/,glProgramUniformMatrix4dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 16, var4, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [16]; ,/*EMPTY*/,glProgramUniformMatrix4fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 16, var4, 16))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix4x2dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [8]; ,/*EMPTY*/,glProgramUniformMatrix4x2fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 8, var4, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLdouble var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix4x3dv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2);  GLfloat var4 [12]; ,/*EMPTY*/,glProgramUniformMatrix4x3fv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLboolean, duk_get_boolean(ctx, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 12, var4, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glReleaseShaderCompiler)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLint var2 [0]; ,/*EMPTY*/,glScissorArrayv, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLint *, duk_gl_get_GLint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glScissorIndexed, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glScissorIndexedv, GLuint, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glUseProgramStages, GLuint, duk_get_uint(ctx, 0), GLbitfield, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glValidateProgramPipeline, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribL1d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [1]; ,/*EMPTY*/,glVertexAttribL1dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexAttribL2d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [2]; ,/*EMPTY*/,glVertexAttribL2dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribL3d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [3]; ,/*EMPTY*/,glVertexAttribL3dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribL4d, GLuint, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLdouble, duk_get_number(ctx, 3), GLdouble, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLdouble var1 [4]; ,/*EMPTY*/,glVertexAttribL4dv, GLuint, duk_get_uint(ctx, 0), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 1, 4, var1, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLfloat var2 [0]; ,/*EMPTY*/,glViewportArrayv, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glViewportIndexedf, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glViewportIndexedfv, GLuint, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
 #endif /* DUK_GL_OPENGL_4_1 */
 
 #ifdef DUK_GL_OPENGL_4_2
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glBindImageTexture, GLuint, uint, GLuint, uint, GLint, int, GLboolean, boolean, GLint, int, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glDrawArraysInstancedBaseInstance, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDrawTransformFeedbackInstanced, GLenum, uint, GLuint, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawTransformFeedbackStreamInstanced, GLenum, uint, GLuint, uint, GLuint, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMemoryBarrier, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexStorage1D, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glTexStorage2D, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTexStorage3D, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glBindImageTexture, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLint, duk_get_int(ctx, 4), GLenum, duk_get_uint(ctx, 5), GLenum, duk_get_uint(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawArraysInstancedBaseInstance, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3, GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glDrawTransformFeedbackInstanced, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawTransformFeedbackStreamInstanced, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetActiveAtomicCounterBufferiv, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3); GLint var4 [1]; ,duk_gl_put_GLint_array(ctx, 4, 1, var4, 1); ,glGetInternalformativ, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLint *, duk_gl_get_GLint_array(ctx, 4, 1, var4, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMemoryBarrier, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glTexStorage1D, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glTexStorage2D, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTexStorage3D, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLsizei, var5)
 #endif /* DUK_GL_OPENGL_4_2 */
 
 #ifdef DUK_GL_OPENGL_4_3
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(glCopyImageSubData, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLuint, uint, GLenum, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glDebugMessageInsert, GLenum, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDispatchCompute, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glFramebufferParameteri, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetProgramResourceIndex, uint, GLuint, uint, GLenum, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetProgramResourceLocation, int, GLuint, uint, GLenum, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glGetProgramResourceLocationIndex, int, GLuint, uint, GLenum, uint, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glInvalidateBufferData, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glInvalidateTexImage, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glInvalidateTexSubImage, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glObjectLabel, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glPopDebugGroup)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glPushDebugGroup, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glShaderStorageBlockBinding, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTexStorage2DMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTexStorage3DMultisample, GLenum, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTextureView, GLuint, uint, GLenum, uint, GLuint, uint, GLenum, uint, GLuint, uint, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexAttribBinding, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexAttribFormat, GLuint, uint, GLint, int, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribIFormat, GLuint, uint, GLint, int, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertexAttribLFormat, GLuint, uint, GLint, int, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexBindingDivisor, GLuint, uint, GLuint, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(GLsizei var12 = duk_get_int(ctx, 12); GLsizei var13 = duk_get_int(ctx, 13); GLsizei var14 = duk_get_int(ctx, 14); ,/*EMPTY*/,glCopyImageSubData, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLenum, duk_get_uint(ctx, 7), GLint, duk_get_int(ctx, 8), GLint, duk_get_int(ctx, 9), GLint, duk_get_int(ctx, 10), GLint, duk_get_int(ctx, 11), GLsizei, var12, GLsizei, var13, GLsizei, var14)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var3 = duk_get_int(ctx, 3);  GLuint var4 [0]; ,/*EMPTY*/,glDebugMessageControl, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3, const GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0), GLboolean, duk_get_boolean(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glDebugMessageInsert, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLsizei, var4, const GLchar *, duk_get_string(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glDispatchCompute, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glFramebufferParameteri, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG8(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var6 = duk_get_DETERMINE(ctx, 6); GLenum var2 [0]; GLenum var3 [0]; GLuint var4 [0]; GLenum var5 [0]; GLsizei var6 [0]; GLchar var7 [0]; ,duk_gl_put_GLenum_array(ctx, 2, 0, var2, 0); duk_gl_put_GLenum_array(ctx, 3, 0, var3, 0); duk_gl_put_GLuint_array(ctx, 4, 0, var4, 0); duk_gl_put_GLenum_array(ctx, 5, 0, var5, 0); duk_gl_put_GLsizei_array(ctx, 6, 0, var6, 0); duk_gl_put_GLchar_array(ctx, 7, 0, var7, 0); ,glGetDebugMessageLog, uint, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 3, 0, var3, 0), GLuint *, duk_gl_get_GLuint_array(ctx, 4, 0, var4, 0), GLenum *, duk_gl_get_GLenum_array(ctx, 5, 0, var5, 0), GLsizei *, duk_gl_get_GLsizei_array(ctx, 6, 0, var6, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 7, 0, var7, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetFramebufferParameteriv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var3 = duk_get_int(ctx, 3); GLint64 var4 [0]; ,duk_gl_put_GLint64_array(ctx, 4, 0, var4, 0); ,glGetInternalformati64v, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLint64 *, duk_gl_get_GLint64_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_DETERMINE(ctx, 3); GLsizei var3 [0]; GLchar var4 [0]; ,duk_gl_put_GLsizei_array(ctx, 3, 0, var3, 0); duk_gl_put_GLchar_array(ctx, 4, 0, var4, 0); ,glGetObjectLabel, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei *, duk_gl_get_GLsizei_array(ctx, 3, 0, var3, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 4, 0, var4, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetProgramInterfaceiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glGetProgramResourceIndex, uint, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glGetProgramResourceLocation, int, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(/*EMPTY*/,/*EMPTY*/,glGetProgramResourceLocationIndex, int, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLchar *, duk_get_string(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_DETERMINE(ctx, 4); GLsizei var4 [0]; GLchar var5 [0]; ,duk_gl_put_GLsizei_array(ctx, 4, 0, var4, 0); duk_gl_put_GLchar_array(ctx, 5, 0, var5, 0); ,glGetProgramResourceName, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei *, duk_gl_get_GLsizei_array(ctx, 4, 0, var4, 0), GLchar *, duk_gl_get_GLchar_array(ctx, 5, 0, var5, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var3 = duk_get_int(ctx, 3); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_DETERMINE(ctx, 6);  GLenum var4 [1]; GLsizei var6 [1]; GLint var7 [1]; ,duk_gl_put_GLsizei_array(ctx, 6, 1, var6, 1); duk_gl_put_GLint_array(ctx, 7, 1, var7, 1); ,glGetProgramResourceiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLsizei, var3, const GLenum *, duk_gl_get_GLenum_array(ctx, 4, 1, var4, 1), GLsizei, var5, GLsizei *, duk_gl_get_GLsizei_array(ctx, 6, 1, var6, 1), GLint *, duk_gl_get_GLint_array(ctx, 7, 1, var7, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glInvalidateBufferData, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLenum var2 [0]; ,/*EMPTY*/,glInvalidateFramebuffer, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6);  GLenum var2 [0]; ,/*EMPTY*/,glInvalidateSubFramebuffer, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, const GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glInvalidateTexImage, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glInvalidateTexSubImage, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6, GLsizei, var7)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glObjectLabel, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLchar *, duk_get_string(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glPopDebugGroup)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); ,/*EMPTY*/,glPushDebugGroup, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLchar *, duk_get_string(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glShaderStorageBlockBinding, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glTexStorage2DMultisample, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLboolean, duk_get_boolean(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTexStorage3DMultisample, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLsizei, var5, GLboolean, duk_get_boolean(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(/*EMPTY*/,/*EMPTY*/,glTextureView, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4), GLuint, duk_get_uint(ctx, 5), GLuint, duk_get_uint(ctx, 6), GLuint, duk_get_uint(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexAttribBinding, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexAttribFormat, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLboolean, duk_get_boolean(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribIFormat, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glVertexAttribLFormat, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexBindingDivisor, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
 #endif /* DUK_GL_OPENGL_4_3 */
 
+#ifdef DUK_GL_OPENGL_4_4
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2);  GLuint var3 [0]; ,/*EMPTY*/,glBindBuffersBase, GLenum, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLsizei, var2, const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [0]; ,/*EMPTY*/,glBindImageTextures, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [0]; ,/*EMPTY*/,glBindSamplers, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLuint var2 [0]; ,/*EMPTY*/,glBindTextures, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+#endif /* DUK_GL_OPENGL_4_4 */
+
 #ifdef DUK_GL_OPENGL_4_5
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glAccumxOES, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glAlphaFuncxOES, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginConditionalRenderNVX, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBeginPerfMonitorAMD, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBindTextureUnit, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glBindVertexArrayAPPLE, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glBlendBarrierKHR)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendColorxOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glBlendEquationIndexedAMD, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendEquationSeparateIndexedAMD, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBlendFuncIndexedAMD, GLuint, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glBlendFuncSeparateINGR, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glBlendFuncSeparateIndexedAMD, GLuint, uint, GLenum, uint, GLenum, uint, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(glBlitNamedFramebuffer, GLuint, uint, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLbitfield, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glBufferParameteriAPPLE, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glCheckNamedFramebufferStatus, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearAccumxOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glClearColorxOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearDepthfOES, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glClearDepthxOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glClipControl, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glColor3xOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glColor4xOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameterf, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameteri, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glConvolutionParameterxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorSubTable, GLenum, uint, GLsizei, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorTable, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyConvolutionFilter1D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyConvolutionFilter2D, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glCopyTextureSubImage1D, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glCopyTextureSubImage2D, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glCopyTextureSubImage3D, GLuint, uint, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glDebugMessageInsertAMD, GLenum, uint, GLenum, uint, GLuint, uint, GLsizei, int, const GLchar *, string)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRangefOES, GLclampf, number, GLclampf, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDepthRangexOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableVertexArrayAttrib, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDisableVertexAttribAPPLE, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glDrawElementArrayAPPLE, GLenum, uint, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glDrawRangeElementArrayAPPLE, GLenum, uint, GLuint, uint, GLuint, uint, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableVertexArrayAttrib, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEnableVertexAttribAPPLE, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glEndConditionalRenderNVX)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEndPerfMonitorAMD, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glEvalCoord1xOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glEvalCoord2xOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFinishFenceAPPLE, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFinishObjectAPPLE, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glFinishTextureSUNX)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFogxOES, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glFrameTerminatorGREMEDY)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFramebufferTextureMultiviewOVR, GLenum, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFrustumfOES, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glFrustumxOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGenerateTextureMipmap, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(glGetGraphicsResetStatus, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glGetMaterialxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glHintPGI, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glHistogram, GLenum, uint, GLsizei, int, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glIndexxOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsFenceAPPLE, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsNameAMD, boolean, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsVertexArrayAPPLE, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glIsVertexAttribEnabledAPPLE, boolean, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLightModelxOES, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glLightxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLineWidthxOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glMap1xOES, GLenum, uint, GLfixed, int, GLfixed, int, GLint, int, GLint, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glMap2xOES, GLenum, uint, GLfixed, int, GLfixed, int, GLint, int, GLint, int, GLfixed, int, GLfixed, int, GLint, int, GLint, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMapGrid1xOES, GLint, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMapGrid2xOES, GLint, int, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMaterialxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glMemoryBarrierByRegion, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMinmax, GLenum, uint, GLenum, uint, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1bOES, GLenum, uint, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glMultiTexCoord1xOES, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2bOES, GLenum, uint, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glMultiTexCoord2xOES, GLenum, uint, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3bOES, GLenum, uint, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glMultiTexCoord3xOES, GLenum, uint, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4bOES, GLenum, uint, GLbyte, int, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glMultiTexCoord4xOES, GLenum, uint, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glNamedFramebufferDrawBuffer, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNamedFramebufferParameteri, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glNamedFramebufferReadBuffer, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNamedFramebufferRenderbuffer, GLuint, uint, GLenum, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNamedFramebufferTexture, GLuint, uint, GLenum, uint, GLuint, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedFramebufferTextureLayer, GLuint, uint, GLenum, uint, GLuint, uint, GLint, int, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glNamedRenderbufferStorage, GLuint, uint, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glNamedRenderbufferStorageMultisample, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glNormal3xOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glObjectPurgeableAPPLE, uint, GLenum, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG3(glObjectUnpurgeableAPPLE, uint, GLenum, uint, GLuint, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glOrthofOES, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glOrthoxOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPassThroughxOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelStorex, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelTexGenParameterfSGIS, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelTexGenParameteriSGIS, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelTransferxOES, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPixelZoomxOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPointParameterfSGIS, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPointSizexOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glPolygonOffsetxOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glQueryObjectParameteruiAMD, GLenum, uint, GLuint, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glRasterPos2xOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glRasterPos3xOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRasterPos4xOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRectxOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetHistogram, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glResetMinmax, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glRotatexOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSampleMaskSGIS, GLclampf, number, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glSamplePatternSGIS, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glScalexOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glSetFenceAPPLE, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glStencilOpValueAMD, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTbufferMask3DFX, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTessellationFactorAMD, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTessellationModeAMD, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glTestFenceAPPLE, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(glTestObjectAPPLE, boolean, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1bOES, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glTexCoord1xOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2bOES, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glTexCoord2xOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3bOES, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexCoord3xOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4bOES, GLbyte, int, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTexCoord4xOES, GLfixed, int, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexEnvxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexGenxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTexParameterxOES, GLenum, uint, GLenum, uint, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTexStorageSparseAMD, GLenum, uint, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLsizei, int, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glTextureBarrier)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTextureBuffer, GLuint, uint, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTextureColorMaskSGIS, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTextureParameterf, GLuint, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTextureParameteri, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glTextureStorage1D, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glTextureStorage2D, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTextureStorage2DMultisample, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glTextureStorage3D, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glTextureStorage3DMultisample, GLuint, uint, GLsizei, int, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLboolean, boolean)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTextureStorageSparseAMD, GLuint, uint, GLenum, uint, GLenum, uint, GLsizei, int, GLsizei, int, GLsizei, int, GLsizei, int, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTransformFeedbackBufferBase, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glTranslatexOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glUnmapNamedBuffer, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex2bOES, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glVertex2xOES, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex3bOES, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertex3xOES, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glVertex4bOES, GLbyte, int, GLbyte, int, GLbyte, int, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertex4xOES, GLfixed, int, GLfixed, int, GLfixed, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexArrayAttribBinding, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glVertexArrayAttribFormat, GLuint, uint, GLuint, uint, GLint, int, GLenum, uint, GLboolean, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexArrayAttribIFormat, GLuint, uint, GLuint, uint, GLint, int, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glVertexArrayAttribLFormat, GLuint, uint, GLuint, uint, GLint, int, GLenum, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexArrayBindingDivisor, GLuint, uint, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexArrayElementBuffer, GLuint, uint, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glVertexArrayParameteriAPPLE, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glVertexAttribParameteriAMD, GLuint, uint, GLenum, uint, GLint, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glBindTextureUnit, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(/*EMPTY*/,/*EMPTY*/,glBlitNamedFramebuffer, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLint, duk_get_int(ctx, 7), GLint, duk_get_int(ctx, 8), GLint, duk_get_int(ctx, 9), GLbitfield, duk_get_uint(ctx, 10), GLenum, duk_get_uint(ctx, 11))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG2(/*EMPTY*/,/*EMPTY*/,glCheckNamedFramebufferStatus, uint, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glClearNamedFramebufferfi, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var3 [1]; ,/*EMPTY*/,glClearNamedFramebufferfv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLint var3 [1]; ,/*EMPTY*/,glClearNamedFramebufferiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), const GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var3 [1]; ,/*EMPTY*/,glClearNamedFramebufferuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), const GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glClipControl, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glCopyTextureSubImage1D, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(GLsizei var6 = duk_get_int(ctx, 6); GLsizei var7 = duk_get_int(ctx, 7); ,/*EMPTY*/,glCopyTextureSubImage2D, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLsizei, var6, GLsizei, var7)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(GLsizei var7 = duk_get_int(ctx, 7); GLsizei var8 = duk_get_int(ctx, 8); ,/*EMPTY*/,glCopyTextureSubImage3D, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLint, duk_get_int(ctx, 5), GLint, duk_get_int(ctx, 6), GLsizei, var7, GLsizei, var8)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateBuffers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateFramebuffers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateProgramPipelines, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLuint var2 [0]; ,duk_gl_put_GLuint_array(ctx, 2, 0, var2, 0); ,glCreateQueries, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateRenderbuffers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateSamplers, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLuint var2 [0]; ,duk_gl_put_GLuint_array(ctx, 2, 0, var2, 0); ,glCreateTextures, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLuint *, duk_gl_get_GLuint_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateTransformFeedbacks, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLuint var1 [0]; ,duk_gl_put_GLuint_array(ctx, 1, 0, var1, 0); ,glCreateVertexArrays, GLsizei, var0, GLuint *, duk_gl_get_GLuint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glDisableVertexArrayAttrib, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glEnableVertexArrayAttrib, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGenerateTextureMipmap, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(/*EMPTY*/,/*EMPTY*/,glGetGraphicsResetStatus, uint)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint64 var2 [0]; ,duk_gl_put_GLint64_array(ctx, 2, 0, var2, 0); ,glGetNamedBufferParameteri64v, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint64 *, duk_gl_get_GLint64_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetNamedBufferParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetNamedFramebufferAttachmentParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetNamedFramebufferParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetNamedRenderbufferParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetTextureLevelParameterfv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetTextureLevelParameteriv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTextureParameterIiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetTextureParameterIuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetTextureParameterfv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTextureParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint64 var3 [0]; ,duk_gl_put_GLint64_array(ctx, 3, 0, var3, 0); ,glGetTransformFeedbacki64_v, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [0]; ,duk_gl_put_GLint_array(ctx, 3, 0, var3, 0); ,glGetTransformFeedbacki_v, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 0, var3, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetTransformFeedbackiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint64 var3 [1]; ,duk_gl_put_GLint64_array(ctx, 3, 1, var3, 1); ,glGetVertexArrayIndexed64iv, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint64 *, duk_gl_get_GLint64_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetVertexArrayIndexediv, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetVertexArrayiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetnMapdv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetnMapfv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetnMapiv, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetnPixelMapfv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLuint var2 [1]; ,duk_gl_put_GLuint_array(ctx, 2, 1, var2, 1); ,glGetnPixelMapuiv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1); GLushort var2 [1]; ,duk_gl_put_GLushort_array(ctx, 2, 1, var2, 1); ,glGetnPixelMapusv, GLenum, duk_get_uint(ctx, 0), GLsizei, var1, GLushort *, duk_gl_get_GLushort_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLubyte var1 [0]; ,duk_gl_put_GLubyte_array(ctx, 1, 0, var1, 0); ,glGetnPolygonStipple, GLsizei, var0, GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLdouble var3 [1]; ,duk_gl_put_GLdouble_array(ctx, 3, 1, var3, 1); ,glGetnUniformdv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLdouble *, duk_gl_get_GLdouble_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLfloat var3 [1]; ,duk_gl_put_GLfloat_array(ctx, 3, 1, var3, 1); ,glGetnUniformfv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLint var3 [1]; ,duk_gl_put_GLint_array(ctx, 3, 1, var3, 1); ,glGetnUniformiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLint *, duk_gl_get_GLint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLuint var3 [1]; ,duk_gl_put_GLuint_array(ctx, 3, 1, var3, 1); ,glGetnUniformuiv, GLuint, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLuint *, duk_gl_get_GLuint_array(ctx, 3, 1, var3, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLenum var2 [0]; ,/*EMPTY*/,glInvalidateNamedFramebufferData, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var5 = duk_get_int(ctx, 5); GLsizei var6 = duk_get_int(ctx, 6);  GLenum var2 [0]; ,/*EMPTY*/,glInvalidateNamedFramebufferSubData, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLsizei, var5, GLsizei, var6)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glMemoryBarrierByRegion, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferDrawBuffer, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLsizei var1 = duk_get_int(ctx, 1);  GLenum var2 [0]; ,/*EMPTY*/,glNamedFramebufferDrawBuffers, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, const GLenum *, duk_gl_get_GLenum_array(ctx, 2, 0, var2, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferParameteri, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferReadBuffer, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferRenderbuffer, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLenum, duk_get_uint(ctx, 2), GLuint, duk_get_uint(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTexture, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glNamedFramebufferTextureLayer, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glNamedRenderbufferStorage, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glNamedRenderbufferStorageMultisample, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glTextureBarrier)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTextureBuffer, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTextureParameterIiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var2 [1]; ,/*EMPTY*/,glTextureParameterIuiv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLuint *, duk_gl_get_GLuint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTextureParameterf, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glTextureParameterfv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTextureParameteri, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glTextureParameteriv, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glTextureStorage1D, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glTextureStorage2D, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glTextureStorage2DMultisample, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLboolean, duk_get_boolean(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTextureStorage3D, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLsizei, var5)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(GLsizei var1 = duk_get_int(ctx, 1); GLsizei var3 = duk_get_int(ctx, 3); GLsizei var4 = duk_get_int(ctx, 4); GLsizei var5 = duk_get_int(ctx, 5); ,/*EMPTY*/,glTextureStorage3DMultisample, GLuint, duk_get_uint(ctx, 0), GLsizei, var1, GLenum, duk_get_uint(ctx, 2), GLsizei, var3, GLsizei, var4, GLsizei, var5, GLboolean, duk_get_boolean(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glTransformFeedbackBufferBase, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glUnmapNamedBuffer, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexArrayAttribBinding, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glVertexArrayAttribFormat, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLboolean, duk_get_boolean(ctx, 4), GLuint, duk_get_uint(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexArrayAttribIFormat, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glVertexArrayAttribLFormat, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLenum, duk_get_uint(ctx, 3), GLuint, duk_get_uint(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glVertexArrayBindingDivisor, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1), GLuint, duk_get_uint(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glVertexArrayElementBuffer, GLuint, duk_get_uint(ctx, 0), GLuint, duk_get_uint(ctx, 1))
 #endif /* DUK_GL_OPENGL_4_5 */
 
 #ifdef DUK_GL_SGI
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glCopyColorTableSGI, GLenum, uint, GLenum, uint, GLint, int, GLint, int, GLsizei, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glColorTableParameterfvSGI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glColorTableParameterivSGI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(GLsizei var4 = duk_get_int(ctx, 4); ,/*EMPTY*/,glCopyColorTableSGI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2), GLint, duk_get_int(ctx, 3), GLsizei, var4)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glFinishTextureSUNX)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameterfvSGI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetColorTableParameterivSGI, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
 #endif /* DUK_GL_SGI */
 
 #ifdef DUK_GL_SGIX
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glAsyncMarkerSGIX, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glDeformSGIX, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glDeleteAsyncMarkersSGIX, GLuint, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glFlushRasterSGIX)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFragmentColorMaterialSGIX, GLenum, uint, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFragmentLightModelfSGIX, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glFragmentLightModeliSGIX, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glFragmentLightfSGIX, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glFragmentLightiSGIX, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glFragmentMaterialfSGIX, GLenum, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glFragmentMaterialiSGIX, GLenum, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glFrameZoomSGIX, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glGenAsyncMarkersSGIX, uint, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(glGetInstrumentsSGIX, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(glIsAsyncMarkerSGIX, boolean, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glLightEnviSGIX, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glListParameterfSGIX, GLuint, uint, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(glListParameteriSGIX, GLuint, uint, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glLoadIdentityDeformationMapSGIX, GLbitfield, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glPixelTexGenSGIX, GLenum, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glReadInstrumentsSGIX, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSpriteParameterfSGIX, GLenum, uint, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(glSpriteParameteriSGIX, GLenum, uint, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glStartInstrumentsSGIX)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glStopInstrumentsSGIX, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(glTagSampleBufferSGIX)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glAsyncMarkerSGIX, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glDeformSGIX, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG14( GLdouble var13 [0]; ,/*EMPTY*/,glDeformationMap3dSGIX, GLenum, duk_get_uint(ctx, 0), GLdouble, duk_get_number(ctx, 1), GLdouble, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLdouble, duk_get_number(ctx, 5), GLdouble, duk_get_number(ctx, 6), GLint, duk_get_int(ctx, 7), GLint, duk_get_int(ctx, 8), GLdouble, duk_get_number(ctx, 9), GLdouble, duk_get_number(ctx, 10), GLint, duk_get_int(ctx, 11), GLint, duk_get_int(ctx, 12), const GLdouble *, duk_gl_get_GLdouble_array(ctx, 13, 0, var13, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG14( GLfloat var13 [0]; ,/*EMPTY*/,glDeformationMap3fSGIX, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLint, duk_get_int(ctx, 3), GLint, duk_get_int(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLint, duk_get_int(ctx, 7), GLint, duk_get_int(ctx, 8), GLfloat, duk_get_number(ctx, 9), GLfloat, duk_get_number(ctx, 10), GLint, duk_get_int(ctx, 11), GLint, duk_get_int(ctx, 12), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 13, 0, var13, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var1 = duk_get_int(ctx, 1); ,/*EMPTY*/,glDeleteAsyncMarkersSGIX, GLuint, duk_get_uint(ctx, 0), GLsizei, var1)
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(GLuint var0 [0]; ,duk_gl_put_GLuint_array(ctx, 0, 0, var0, 0); ,glFinishAsyncSGIX, int, GLuint *, duk_gl_get_GLuint_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glFlushRasterSGIX)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFragmentColorMaterialSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFragmentLightModelfSGIX, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glFragmentLightModelfvSGIX, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glFragmentLightModeliSGIX, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glFragmentLightModelivSGIX, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glFragmentLightfSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glFragmentLightfvSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glFragmentLightiSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glFragmentLightivSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glFragmentMaterialfSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glFragmentMaterialfvSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glFragmentMaterialiSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glFragmentMaterialivSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glFrameZoomSGIX, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(GLsizei var0 = duk_get_int(ctx, 0); ,/*EMPTY*/,glGenAsyncMarkersSGIX, uint, GLsizei, var0)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetFragmentLightfvSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetFragmentLightivSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetFragmentMaterialfvSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetFragmentMaterialivSGIX, GLenum, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG0(/*EMPTY*/,/*EMPTY*/,glGetInstrumentsSGIX, int)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLfloat var2 [1]; ,duk_gl_put_GLfloat_array(ctx, 2, 1, var2, 1); ,glGetListParameterfvSGIX, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(GLint var2 [1]; ,duk_gl_put_GLint_array(ctx, 2, 1, var2, 1); ,glGetListParameterivSGIX, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(GLsizei var0 = duk_get_int(ctx, 0); GLint var1 [0]; ,duk_gl_put_GLint_array(ctx, 1, 0, var1, 0); ,glInstrumentsBufferSGIX, GLsizei, var0, GLint *, duk_gl_get_GLint_array(ctx, 1, 0, var1, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(/*EMPTY*/,/*EMPTY*/,glIsAsyncMarkerSGIX, boolean, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glLightEnviSGIX, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glListParameterfSGIX, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLfloat, duk_get_number(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var2 [1]; ,/*EMPTY*/,glListParameterfvSGIX, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3(/*EMPTY*/,/*EMPTY*/,glListParameteriSGIX, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), GLint, duk_get_int(ctx, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLint var2 [1]; ,/*EMPTY*/,glListParameterivSGIX, GLuint, duk_get_uint(ctx, 0), GLenum, duk_get_uint(ctx, 1), const GLint *, duk_gl_get_GLint_array(ctx, 2, 1, var2, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glLoadIdentityDeformationMapSGIX, GLbitfield, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glPixelTexGenSGIX, GLenum, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(GLuint var0 [0]; ,duk_gl_put_GLuint_array(ctx, 0, 0, var0, 0); ,glPollAsyncSGIX, int, GLuint *, duk_gl_get_GLuint_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET1_ARG1(GLint var0 [0]; ,duk_gl_put_GLint_array(ctx, 0, 0, var0, 0); ,glPollInstrumentsSGIX, int, GLint *, duk_gl_get_GLint_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glReadInstrumentsSGIX, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLdouble var0 [0]; ,/*EMPTY*/,glReferencePlaneSGIX, const GLdouble *, duk_gl_get_GLdouble_array(ctx, 0, 0, var0, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSpriteParameterfSGIX, GLenum, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var1 [1]; ,/*EMPTY*/,glSpriteParameterfvSGIX, GLenum, duk_get_uint(ctx, 0), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2(/*EMPTY*/,/*EMPTY*/,glSpriteParameteriSGIX, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLint var1 [1]; ,/*EMPTY*/,glSpriteParameterivSGIX, GLenum, duk_get_uint(ctx, 0), const GLint *, duk_gl_get_GLint_array(ctx, 1, 1, var1, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glStartInstrumentsSGIX)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glStopInstrumentsSGIX, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG0(/*EMPTY*/,/*EMPTY*/,glTagSampleBufferSGIX)
 #endif /* DUK_GL_SGIX */
 
 #ifdef DUK_GL_SUN
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glColor3fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(glColor4fNormal3fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glColor4ubVertex2fSUN, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glColor4ubVertex3fSUN, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glDrawMeshArraysSUN, GLenum, uint, GLint, int, GLsizei, int, GLsizei, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactorbSUN, GLbyte, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactordSUN, GLdouble, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactorfSUN, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactoriSUN, GLint, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactorsSUN, GLshort, int)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactorubSUN, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactoruiSUN, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glGlobalAlphaFactorusSUN, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glNormal3fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glReplacementCodeubSUN, GLubyte, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glReplacementCodeuiColor3fVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(glReplacementCodeuiColor4fNormal3fVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glReplacementCodeuiColor4ubVertex3fSUN, GLuint, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(glReplacementCodeuiNormal3fVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glReplacementCodeuiSUN, GLuint, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glReplacementCodeuiTexCoord2fNormal3fVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(glReplacementCodeuiTexCoord2fVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(glReplacementCodeuiVertex3fSUN, GLuint, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(glReplacementCodeusSUN, GLushort, uint)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTexCoord2fColor3fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(glTexCoord2fColor4fNormal3fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(glTexCoord2fColor4ubVertex3fSUN, GLfloat, number, GLfloat, number, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLubyte, uint, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTexCoord2fNormal3fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(glTexCoord2fVertex3fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(glTexCoord4fColor4fNormal3fVertex4fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
-DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTexCoord4fVertex4fSUN, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number, GLfloat, number)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glColor3fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var0 [3];  GLfloat var1 [3]; ,/*EMPTY*/,glColor3fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG10(/*EMPTY*/,/*EMPTY*/,glColor4fNormal3fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8), GLfloat, duk_get_number(ctx, 9))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var0 [3];  GLfloat var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glColor4fNormal3fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glColor4ubVertex2fSUN, GLubyte, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var0 [2];  GLfloat var1 [2]; ,/*EMPTY*/,glColor4ubVertex2fvSUN, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 2, var0, 2), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 2, var1, 2))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glColor4ubVertex3fSUN, GLubyte, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLubyte var0 [3];  GLfloat var1 [3]; ,/*EMPTY*/,glColor4ubVertex3fvSUN, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(GLsizei var2 = duk_get_int(ctx, 2); GLsizei var3 = duk_get_int(ctx, 3); ,/*EMPTY*/,glDrawMeshArraysSUN, GLenum, duk_get_uint(ctx, 0), GLint, duk_get_int(ctx, 1), GLsizei, var2, GLsizei, var3)
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactorbSUN, GLbyte, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactordSUN, GLdouble, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactorfSUN, GLfloat, duk_get_number(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactoriSUN, GLint, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactorsSUN, GLshort, duk_get_int(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactorubSUN, GLubyte, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactoruiSUN, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glGlobalAlphaFactorusSUN, GLushort, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glNormal3fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var0 [3];  GLfloat var1 [3]; ,/*EMPTY*/,glNormal3fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glReplacementCodeubSUN, GLubyte, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLubyte var0 [1]; ,/*EMPTY*/,glReplacementCodeubvSUN, const GLubyte *, duk_gl_get_GLubyte_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiColor3fVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var0 [3];  GLfloat var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glReplacementCodeuiColor3fVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG11(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiColor4fNormal3fVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8), GLfloat, duk_get_number(ctx, 9), GLfloat, duk_get_number(ctx, 10))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var0 [3];  GLfloat var1 [3];  GLfloat var2 [3];  GLfloat var3 [3]; ,/*EMPTY*/,glReplacementCodeuiColor4fNormal3fVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiColor4ubVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLubyte, duk_get_uint(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLubyte, duk_get_uint(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var0 [3];  GLubyte var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glReplacementCodeuiColor4ubVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG7(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiNormal3fVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var0 [3];  GLfloat var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glReplacementCodeuiNormal3fVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiSUN, GLuint, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG13(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8), GLfloat, duk_get_number(ctx, 9), GLfloat, duk_get_number(ctx, 10), GLfloat, duk_get_number(ctx, 11), GLfloat, duk_get_number(ctx, 12))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5( GLuint var0 [3];  GLfloat var1 [3];  GLfloat var2 [3];  GLfloat var3 [3];  GLfloat var4 [3]; ,/*EMPTY*/,glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 3, var3, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 4, 3, var4, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiTexCoord2fNormal3fVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLuint var0 [3];  GLfloat var1 [3];  GLfloat var2 [3];  GLfloat var3 [3]; ,/*EMPTY*/,glReplacementCodeuiTexCoord2fNormal3fVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG6(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiTexCoord2fVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLuint var0 [3];  GLfloat var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glReplacementCodeuiTexCoord2fVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4(/*EMPTY*/,/*EMPTY*/,glReplacementCodeuiVertex3fSUN, GLuint, duk_get_uint(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLuint var0 [3];  GLfloat var1 [3]; ,/*EMPTY*/,glReplacementCodeuiVertex3fvSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLuint var0 [1]; ,/*EMPTY*/,glReplacementCodeuivSUN, const GLuint *, duk_gl_get_GLuint_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1(/*EMPTY*/,/*EMPTY*/,glReplacementCodeusSUN, GLushort, duk_get_uint(ctx, 0))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG1( GLushort var0 [1]; ,/*EMPTY*/,glReplacementCodeusvSUN, const GLushort *, duk_gl_get_GLushort_array(ctx, 0, 1, var0, 1))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(/*EMPTY*/,/*EMPTY*/,glTexCoord2fColor3fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var0 [3];  GLfloat var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glTexCoord2fColor3fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG12(/*EMPTY*/,/*EMPTY*/,glTexCoord2fColor4fNormal3fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8), GLfloat, duk_get_number(ctx, 9), GLfloat, duk_get_number(ctx, 10), GLfloat, duk_get_number(ctx, 11))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var0 [3];  GLfloat var1 [3];  GLfloat var2 [3];  GLfloat var3 [3]; ,/*EMPTY*/,glTexCoord2fColor4fNormal3fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 3, var3, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG9(/*EMPTY*/,/*EMPTY*/,glTexCoord2fColor4ubVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLubyte, duk_get_uint(ctx, 2), GLubyte, duk_get_uint(ctx, 3), GLubyte, duk_get_uint(ctx, 4), GLubyte, duk_get_uint(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var0 [3];  GLubyte var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glTexCoord2fColor4ubVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLubyte *, duk_gl_get_GLubyte_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(/*EMPTY*/,/*EMPTY*/,glTexCoord2fNormal3fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG3( GLfloat var0 [3];  GLfloat var1 [3];  GLfloat var2 [3]; ,/*EMPTY*/,glTexCoord2fNormal3fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 3, var2, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG5(/*EMPTY*/,/*EMPTY*/,glTexCoord2fVertex3fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var0 [3];  GLfloat var1 [3]; ,/*EMPTY*/,glTexCoord2fVertex3fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 3, var0, 3), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 3, var1, 3))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG15(/*EMPTY*/,/*EMPTY*/,glTexCoord4fColor4fNormal3fVertex4fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7), GLfloat, duk_get_number(ctx, 8), GLfloat, duk_get_number(ctx, 9), GLfloat, duk_get_number(ctx, 10), GLfloat, duk_get_number(ctx, 11), GLfloat, duk_get_number(ctx, 12), GLfloat, duk_get_number(ctx, 13), GLfloat, duk_get_number(ctx, 14))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG4( GLfloat var0 [4];  GLfloat var1 [4];  GLfloat var2 [4];  GLfloat var3 [4]; ,/*EMPTY*/,glTexCoord4fColor4fNormal3fVertex4fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 2, 4, var2, 4), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 3, 4, var3, 4))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(/*EMPTY*/,/*EMPTY*/,glTexCoord4fVertex4fSUN, GLfloat, duk_get_number(ctx, 0), GLfloat, duk_get_number(ctx, 1), GLfloat, duk_get_number(ctx, 2), GLfloat, duk_get_number(ctx, 3), GLfloat, duk_get_number(ctx, 4), GLfloat, duk_get_number(ctx, 5), GLfloat, duk_get_number(ctx, 6), GLfloat, duk_get_number(ctx, 7))
+DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG2( GLfloat var0 [4];  GLfloat var1 [4]; ,/*EMPTY*/,glTexCoord4fVertex4fvSUN, const GLfloat *, duk_gl_get_GLfloat_array(ctx, 0, 4, var0, 4), const GLfloat *, duk_gl_get_GLfloat_array(ctx, 1, 4, var1, 4))
 #endif /* DUK_GL_SUN */
 
 /*
@@ -2020,121 +3350,473 @@ DUK_GL_C_WRAPPER_FUNCTION_RET0_ARG8(glTexCoord4fVertex4fSUN, GLfloat, number, GL
 void duk_gl_bind_opengl_functions(duk_context *ctx)
 {
 #ifdef DUK_GL_ARB
+	duk_gl_bind_opengl_wrapper(ctx, glAccumxOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glActiveTextureARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glAlphaFuncxOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glBeginPerfMonitorAMD, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginQueryARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindBufferARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindProgramARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glBindVertexArrayAPPLE, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glBitmapxOES, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendBarrierKHR, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendColorxOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationIndexedAMD, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationSeparateIndexedAMD, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationSeparateiARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationiARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncIndexedAMD, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparateIndexedAMD, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparateiARB, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendFunciARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBufferParameteriAPPLE, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glClampColorARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glClearAccumxOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glClearColorxOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glClearDepthfOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glClearDepthxOES, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClientActiveTextureARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glClipPlanefOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glClipPlanexOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4xOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glColorTableParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColorTableParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glCompileShaderIncludeARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyColorSubTable, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyColorTable, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter1D, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter2D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glCurrentPaletteMatrixARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageControlARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageEnableAMD, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsertAMD, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsertARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteBuffersARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteFencesAPPLE, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteNamedStringARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteNamesAMD, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glDeletePerfMonitorsAMD, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteProgramsARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteQueriesARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteVertexArraysAPPLE, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDepthRangefOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDepthRangexOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexAttribAPPLE, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexAttribArrayARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDispatchComputeGroupSizeARB, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysInstancedARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawBuffersARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawElementArrayAPPLE, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawRangeElementArrayAPPLE, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glEnableVertexAttribAPPLE, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableVertexAttribArrayARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEndPerfMonitorAMD, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEndQueryARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1xOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2xOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2xvOES, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvaluateDepthValuesARB, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glFeedbackBufferxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glFinishFenceAPPLE, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFinishObjectAPPLE, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFogxOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFogxvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFramebufferSampleLocationsfvARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureFaceARB, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureLayerARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glFrustumfOES, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glFrustumxOES, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glGenBuffersARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenFencesAPPLE, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenNamesAMD, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGenPerfMonitorsAMD, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenProgramsARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenQueriesARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenVertexArraysAPPLE, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBufferParameterivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetClipPlanefOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetClipPlanexOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameterxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDebugMessageLogAMD, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDebugMessageLogARB, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFixedvOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGetGraphicsResetStatusARB, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameterxvOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetImageHandleARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetLightxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMaterialxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMinmaxParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMinmaxParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedStringARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedStringivARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetObjectParameterivAPPLE, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfMonitorCounterDataAMD, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfMonitorCounterStringAMD, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfMonitorCountersAMD, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfMonitorGroupStringAMD, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfMonitorGroupsAMD, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelMapxv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramEnvParameterdvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramEnvParameterfvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramLocalParameterdvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramLocalParameterfvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjectivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjectuivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexEnvxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexGenxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexLevelParameterxvOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameterxvOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureHandleARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureSamplerHandleARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformi64vARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformui64vARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribLui64vARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribdvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribfvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnMapdvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnMapfvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnMapivARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPixelMapfvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPixelMapuivARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPixelMapusvARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPolygonStippleARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformdvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformfvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformi64vARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformivARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformui64vARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformuivARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glHistogram, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexxvOES, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsBufferARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIsFenceAPPLE, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsImageHandleResidentARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIsNameAMD, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsNamedStringARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsProgramARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsQueryARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTextureHandleResidentARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIsVertexArrayAPPLE, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIsVertexAttribEnabledAPPLE, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glLightModelxOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glLightModelxvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glLightxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glLightxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glLineWidthxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadMatrixxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadTransposeMatrixdARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadTransposeMatrixfARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadTransposeMatrixxOES, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeImageHandleNonResidentARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeImageHandleResidentARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeTextureHandleNonResidentARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeTextureHandleResidentARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMap1xOES, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glMap2xOES, 10);
+	duk_gl_bind_opengl_wrapper(ctx, glMapGrid1xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMapGrid2xOES, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMapVertexAttrib1dAPPLE, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glMapVertexAttrib1fAPPLE, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glMapVertexAttrib2dAPPLE, 11);
+	duk_gl_bind_opengl_wrapper(ctx, glMapVertexAttrib2fAPPLE, 11);
+	duk_gl_bind_opengl_wrapper(ctx, glMaterialxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMaterialxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixIndexubvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixIndexuivARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixIndexusvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMaxShaderCompilerThreadsARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMinSampleShadingARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMinmax, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultMatrixxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultTransposeMatrixdARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultTransposeMatrixfARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultTransposeMatrixxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiDrawElementArrayAPPLE, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiDrawRangeElementArrayAPPLE, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1bOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1bvOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1dARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1fARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1iARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1ivARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1sARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1svARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1xOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1xvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2bOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2bvOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2dARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2fARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2iARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2ivARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2sARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2svARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2xvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3bOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3bvOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3dARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3fARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3iARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3ivARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3sARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3svARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3xOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3xvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4bOES, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4bvOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4dARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4fARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4iARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4ivARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4sARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4svARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4xOES, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4xvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferSampleLocationsfvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedStringARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glObjectPurgeableAPPLE, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glObjectUnpurgeableAPPLE, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glOrthofOES, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glOrthoxOES, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glPassThroughxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelMapx, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelStorex, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTransferxOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelZoomxOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterxvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointSizexOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPolygonOffsetxOES, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPrimitiveBoundingBoxARB, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glPrioritizeTexturesxOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameter4dARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameter4dvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameter4fARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameter4fvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameter4dARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameter4dvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameter4fARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameter4fvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramParameteriARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1i64ARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1i64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1ui64ARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1ui64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2i64ARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2i64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2ui64ARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2ui64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3i64ARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3i64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3ui64ARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3ui64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4i64ARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4i64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4ui64ARB, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4ui64vARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformHandleui64ARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformHandleui64vARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glQueryMatrixxOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glQueryObjectParameteruiAMD, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2xOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4xOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glRectxOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRectxvOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glResetHistogram, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glResetMinmax, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glRotatexOES, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glSampleCoverageARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glScalexOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSelectPerfMonitorCountersAMD, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glSetFenceAPPLE, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glSetMultisamplefvAMD, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glStencilOpValueAMD, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTbufferMask3DFX, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTessellationFactorAMD, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTessellationModeAMD, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTestFenceAPPLE, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTestObjectAPPLE, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexBufferARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1bOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1xOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2bOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2xOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3bOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4bOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4xOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexEnvxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexEnvxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexGenxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexGenxvOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexPageCommitmentARB, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterxvOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexStorageSparseAMD, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureStorageSparseAMD, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glTranslatexOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1fARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1fvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1i64ARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1i64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1iARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1ivARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1ui64ARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1ui64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2fARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2fvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2i64ARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2i64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2iARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2ivARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2ui64ARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2ui64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3fARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3fvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3i64ARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3i64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3iARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3ivARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3ui64ARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3ui64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4fARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4fvARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4i64ARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4i64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4iARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4ivARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4ui64ARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4ui64vARB, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniformHandleui64ARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformHandleui64vARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2fvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3fvARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4fvARB, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glUnmapBufferARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2bOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2xOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3bOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3xOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4bOES, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4bvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4xOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4xvOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayParameteriAPPLE, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1dARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1fARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1sARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1svARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2dARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2fARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2sARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2svARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3dARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3fARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3fvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3sARB, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3svARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NbvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NivARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NsvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NubARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NubvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NuivARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4NusvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4bvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4dARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4dvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4fARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4fvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4ivARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4sARB, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4svARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4ubvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4uivARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4usvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribDivisorARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1ui64ARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1ui64vARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribParameteriAMD, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexBlendARB, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightbvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightdvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightfvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightivARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightsvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightubvARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightuivARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightusvARB, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2dARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2dvARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2fARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2fvARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2iARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2ivARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2sARB, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2svARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3dARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3dvARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3fARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3fvARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3iARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3ivARB, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3sARB, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3svARB, 1);
 #endif /* DUK_GL_ARB */
 
 #ifdef DUK_GL_ATI
@@ -2150,50 +3832,86 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glColorFragmentOp2ATI, 10);
 	duk_gl_bind_opengl_wrapper(ctx, glColorFragmentOp3ATI, 13);
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteFragmentShaderATI, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawBuffersATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawElementArrayATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawRangeElementArrayATI, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glEndFragmentShaderATI, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glFreeObjectBufferATI, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGenFragmentShadersATI, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetArrayObjectfvATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetArrayObjectivATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetObjectBufferfvATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetObjectBufferivATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexBumpParameterfvATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexBumpParameterivATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVariantArrayObjectfvATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVariantArrayObjectivATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribArrayObjectfvATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribArrayObjectivATI, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsObjectBufferATI, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3bATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3bvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3dATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3dvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3fATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3fvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3iATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3ivATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3sATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNormalStream3svATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPNTrianglesfATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPNTrianglesiATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPassTexCoordATI, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glSampleMapATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSetFragmentShaderConstantATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilFuncSeparateATI, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilOpSeparateATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexBumpParameterfvATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexBumpParameterivATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glUnmapObjectBufferATI, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVariantArrayObjectATI, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribArrayObjectATI, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexBlendEnvfATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexBlendEnviATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1dATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1dvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1fATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1fvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1iATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1ivATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1sATI, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream1svATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2dATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2dvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2fATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2fvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2iATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2ivATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2sATI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream2svATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3dATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3dvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3fATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3fvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3iATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3ivATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3sATI, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream3svATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4dATI, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4dvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4fATI, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4fvATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4iATI, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4ivATI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4sATI, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexStream4svATI, 2);
 #endif /* DUK_GL_ATI */
 
 #ifdef DUK_GL_EXT
 	duk_gl_bind_opengl_wrapper(ctx, glActiveProgramEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glActiveStencilFaceEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glApplyTextureEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glAreTexturesResidentEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glArrayElementEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginTransformFeedbackEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginVertexShaderEXT, 0);
@@ -2211,10 +3929,15 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glBindTextureUnitParameterEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindVertexShaderEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBinormal3bEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBinormal3bvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBinormal3dEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBinormal3dvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBinormal3fEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBinormal3fvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBinormal3iEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBinormal3ivEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBinormal3sEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBinormal3svEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendColorEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationSeparateEXT, 2);
@@ -2227,7 +3950,9 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glClientAttribDefaultEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColorMaskIndexedEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterfEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterfvEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteriEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyColorSubTableEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter1DEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter2DEXT, 6);
@@ -2247,8 +3972,14 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage2DEXT, 9);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage3DEXT, 10);
 	duk_gl_bind_opengl_wrapper(ctx, glCreateShaderProgramEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCullParameterdvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCullParameterfvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteFramebuffersEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteRenderbuffersEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteTexturesEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteVertexShaderEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthBoundsEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDetailTexFuncSGIS, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableClientStateIndexedEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableClientStateiEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableIndexedEXT, 2);
@@ -2257,6 +3988,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexArrayEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysInstancedEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glEdgeFlagPointerEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableClientStateIndexedEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableClientStateiEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableIndexedEXT, 2);
@@ -2267,8 +3999,13 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glEndVertexShaderEXT, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glExtractComponentEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFogCoorddEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFogCoorddvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFogCoordfEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFogCoordfvEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFogFuncSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFrameTerminatorGREMEDY, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferDrawBufferEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFramebufferDrawBuffersEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferReadBufferEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferRenderbufferEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTexture1DEXT, 5);
@@ -2277,13 +4014,90 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureFaceEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureLayerEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureMultiviewOVR, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glGenFramebuffersEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenRenderbuffersEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGenSymbolsEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGenTexturesEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGenVertexShadersEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateMipmapEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateMultiTexMipmapEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateTextureMipmapEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBooleanIndexedvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameterfvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameterfvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDetailTexFuncSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDoubleIndexedvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDoublei_vEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFloatIndexedvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFloati_vEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFogFuncSGIS, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetFragDataLocationEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFramebufferAttachmentParameterivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFramebufferParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameterfvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetIntegerIndexedvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInvariantBooleanvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInvariantFloatvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInvariantIntegervEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetLocalConstantBooleanvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetLocalConstantFloatvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetLocalConstantIntegervEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMinmaxParameterfvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMinmaxParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexEnvfvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexEnvivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexGendvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexGenfvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexGenivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexLevelParameterfvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexLevelParameterivEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexParameterIivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexParameterIuivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexParameterfvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultiTexParameterivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedBufferParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedFramebufferAttachmentParameterivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedFramebufferParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedProgramLocalParameterIivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedProgramLocalParameterIuivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedProgramLocalParameterdvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedProgramLocalParameterfvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedProgramivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedRenderbufferParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetObjectLabelEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelTexGenParameterfvSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelTexGenParameterivSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelTransformParameterfvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelTransformParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjecti64vEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjectui64vEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetRenderbufferParameterivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSharpenTexFuncSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexFilterFuncSGIS, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameterIivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameterIuivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureLevelParameterfvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureLevelParameterivEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterIivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterIuivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterfvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTransformFeedbackVaryingEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glGetUniformBufferSizeEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformuivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVariantBooleanvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVariantFloatvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVariantIntegervEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexArrayIntegeri_vEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexArrayIntegervEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribIivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribIuivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribLdvEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glHintPGI, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glHistogramEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexFuncEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexMaterialEXT, 2);
@@ -2298,6 +4112,14 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glLockArraysEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixFrustumEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoadIdentityEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoadTransposedEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoadTransposefEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoaddEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoadfEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMultTransposedEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMultTransposefEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMultdEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMultfEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixOrthoEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixPopEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixPushEXT, 1);
@@ -2309,14 +4131,24 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixTranslatefEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMemoryBarrierEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMinmaxEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiDrawArraysEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexBufferEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexEnvfEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexEnvfvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexEnviEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexEnvivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexGendEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexGendvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexGenfEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexGenfvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexGeniEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexGenivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexParameterIivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexParameterIuivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexParameterfEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexParameterfvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexParameteriEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexParameterivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexRenderbufferEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferParameteriEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferRenderbufferEXT, 4);
@@ -2327,35 +4159,88 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferTextureFaceEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferTextureLayerEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameter4dEXT, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameter4dvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameter4fEXT, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameter4fvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameterI4iEXT, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameterI4ivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameterI4uiEXT, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameterI4uivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParameters4fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParametersI4ivEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedProgramLocalParametersI4uivEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedRenderbufferStorageEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedRenderbufferStorageMultisampleCoverageEXT, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedRenderbufferStorageMultisampleEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenParameterfSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenParameterfvSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenParameteriSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenParameterivSGIS, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPixelTransformParameterfEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTransformParameterfvEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPixelTransformParameteriEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelTransformParameterivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfSGIS, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfvSGIS, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPolygonOffsetClampEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPolygonOffsetEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPopGroupMarkerEXT, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glPrioritizeTexturesEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameters4fvEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameters4fvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramParameteriEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1dEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1dvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1fEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1fvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1iEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1ivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1uiEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1uivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2dEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2dvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2fEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2fvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2iEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2ivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2uiEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2uivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3dEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3dvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3fEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3fvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3iEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3ivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3uiEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3uivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4dEXT, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4dvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4fEXT, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4fvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4iEXT, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4ivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4uiEXT, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4uivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x3dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x3fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x4dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x4fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x2dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x2fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x4dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x4fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x2dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x2fvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x3dvEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x3fvEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glProvokingVertexEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPushClientAttribDefaultEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPushGroupMarkerEXT, 2);
@@ -2365,47 +4250,84 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glResetHistogramEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glResetMinmaxEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSampleMaskEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glSampleMaskSGIS, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glSamplePatternEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glSamplePatternSGIS, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3bEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3bvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3dEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3dvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3fEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3fvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3iEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3ivEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3sEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3svEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3ubEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3ubvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3uiEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3uivEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3usEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3usvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glShaderOp1EXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glShaderOp2EXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glShaderOp3EXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glSharpenTexFuncSGIS, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilClearTagEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glSwizzleEXT, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glTangent3bEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTangent3bvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTangent3dEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTangent3dvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTangent3fEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTangent3fvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTangent3iEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTangent3ivEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTangent3sEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTangent3svEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexBufferEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexFilterFuncSGIS, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterIivEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterIuivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureBufferEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureColorMaskSGIS, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureLightEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureMaterialEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureNormalEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexturePageCommitmentEXT, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterIivEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterIuivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterfEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterfvEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureParameteriEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterivEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureRenderbufferEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage1DEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage2DEXT, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage2DMultisampleEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage3DEXT, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage3DMultisampleEXT, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glTransformFeedbackVaryingsEXT, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1uiEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1uivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2uiEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2uivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3uiEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3uivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4uiEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4uivEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniformBufferEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUnlockArraysEXT, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glUnmapNamedBufferEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glUseShaderProgramEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantbvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantdvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantfvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantivEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantsvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantubvEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantuivEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVariantusvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayVertexAttribBindingEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayVertexAttribDivisorEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayVertexAttribFormatEXT, 6);
@@ -2413,35 +4335,66 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayVertexAttribLFormatEXT, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayVertexBindingDivisorEXT, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1iEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1ivEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1uiEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1uivEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2iEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2ivEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2uiEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2uivEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3iEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3ivEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3uiEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3uivEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4bvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4iEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4ivEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4svEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4ubvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4uiEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4uivEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4usvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1dEXT, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1dvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2dEXT, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2dvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3dEXT, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3dvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4dEXT, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4dvEXT, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexWeightfEXT, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexWeightfvEXT, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWriteMaskEXT, 6);
 #endif /* DUK_GL_EXT */
 
 #ifdef DUK_GL_HP
+	duk_gl_bind_opengl_wrapper(ctx, glGetImageTransformParameterfvHP, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetImageTransformParameterivHP, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glImageTransformParameterfHP, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glImageTransformParameterfvHP, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glImageTransformParameteriHP, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glImageTransformParameterivHP, 3);
 #endif /* DUK_GL_HP */
 
 #ifdef DUK_GL_IBM
+	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparateINGR, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFlushStaticDataIBM, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiModeDrawArraysIBM, 5);
 #endif /* DUK_GL_IBM */
 
 #ifdef DUK_GL_INTEL
 	duk_gl_bind_opengl_wrapper(ctx, glApplyFramebufferAttachmentCMAAINTEL, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glBeginConditionalRenderNVX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginPerfQueryINTEL, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glCreatePerfQueryINTEL, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDeletePerfQueryINTEL, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEndConditionalRenderNVX, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glEndPerfQueryINTEL, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFirstPerfQueryIdINTEL, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNextPerfQueryIdINTEL, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfCounterInfoINTEL, 11);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfQueryIdByNameINTEL, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPerfQueryInfoINTEL, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glSyncTextureINTEL, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glUnmapTexture2DINTEL, 2);
 #endif /* DUK_GL_INTEL */
@@ -2450,24 +4403,42 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDisableTraceMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableTraceMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEndTraceMESA, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramRegisterfvMESA, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glNewTraceMESA, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glResizeBuffersMESA, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glTraceAssertAttribMESA, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTraceCommentMESA, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTraceListMESA, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTraceTextureMESA, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2dMESA, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2dvMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2fMESA, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2fvMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2iMESA, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2ivMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2sMESA, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2svMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3dMESA, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3dvMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3fMESA, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3fvMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3iMESA, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3ivMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3sMESA, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3svMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4dMESA, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4dvMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4fMESA, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4fvMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4iMESA, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4ivMESA, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4sMESA, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos4svMESA, 1);
 #endif /* DUK_GL_MESA */
 
 #ifdef DUK_GL_NV
 	duk_gl_bind_opengl_wrapper(ctx, glActiveVaryingNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glAreProgramsResidentNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginConditionalRenderNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginOcclusionQueryNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBeginTransformFeedbackNV, 1);
@@ -2481,12 +4452,17 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCallCommandListNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClearDepthdNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4hNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColorFormatNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glCombinerInputNV, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glCombinerOutputNV, 10);
 	duk_gl_bind_opengl_wrapper(ctx, glCombinerParameterfNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCombinerParameterfvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCombinerParameteriNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCombinerParameterivNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCombinerStageParameterfvNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glCommandListSegmentsNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCompileCommandListNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glConservativeRasterParameterfNV, 2);
@@ -2495,9 +4471,20 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCoverFillPathNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCoverStrokePathNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCoverageModulationNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glCoverageModulationTableNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateCommandListsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateStatesNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteCommandListsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteFencesNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteOcclusionQueriesNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDeletePathsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteProgramsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteStatesNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteTransformFeedbacksNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthBoundsdNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthRangedNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawCommandsAddressNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawCommandsStatesAddressNV, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTextureNV, 11);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedbackNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEdgeFlagFormatNV, 1);
@@ -2506,21 +4493,89 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glEndTransformFeedbackNV, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glEndVideoCaptureNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalMapsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glExecuteProgramNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFinalCombinerInputNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFinishFenceNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFlushPixelDataRangeNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFlushVertexArrayRangeNV, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glFogCoordFormatNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFogCoordhNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFogCoordhvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentCoverageColorNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFramebufferSampleLocationsfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGenFencesNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenOcclusionQueriesNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGenPathsNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGenProgramsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenTransformFeedbacksNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveVaryingNV, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBufferParameterui64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetCombinerInputParameterfvNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetCombinerInputParameterivNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetCombinerOutputParameterfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetCombinerOutputParameterivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetCombinerStageParameterfvNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetCommandHeaderNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetCoverageModulationTableNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFenceivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFinalCombinerInputParameterfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFinalCombinerInputParameterivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetImageHandleNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetIntegerui64i_vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetIntegerui64vNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInternalformatSampleivNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapAttribParameterfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapAttribParameterivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapParameterfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapParameterivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultisamplefvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedBufferParameterui64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetOcclusionQueryivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetOcclusionQueryuivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathColorGenfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathColorGenivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathCommandsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathCoordsNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathDashArrayNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGetPathLengthNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathMetricRangeNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathParameterfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathParameterivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathTexGenfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPathTexGenivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramEnvParameterIivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramEnvParameterIuivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramLocalParameterIivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramLocalParameterIuivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramNamedParameterdvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramNamedParameterfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramParameterdvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramParameterfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourcefvNV, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramStringNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramSubroutineParameteruivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetStageIndexNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureHandleNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetTextureSamplerHandleNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTrackMatrixivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTransformFeedbackVaryingNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformi64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetVaryingLocationNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribLi64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribLui64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribdvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoCaptureStreamdvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoCaptureStreamfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoCaptureStreamivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoCaptureivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoi64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideoui64vNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVideouivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexFormatNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glInterpolatePathsNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glIsBufferResidentNV, 1);
@@ -2536,6 +4591,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glIsStateNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTextureHandleResidentNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTransformFeedbackNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadProgramNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeBufferNonResidentNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeBufferResidentNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeImageHandleNonResidentNV, 1);
@@ -2544,46 +4600,100 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glMakeNamedBufferResidentNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeTextureHandleNonResidentNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMakeTextureHandleResidentNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMapParameterfvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMapParameterivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoad3x2fNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoad3x3fNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixLoadTranspose3x3fNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMult3x2fNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMult3x3fNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMatrixMultTranspose3x3fNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1hNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3hNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4hNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4hvNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferSampleLocationsfvNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalFormatNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPathColorGenNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glPathCoverDepthFuncNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPathDashArrayNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPathFogGenNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPathParameterfNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPathParameterfvNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPathParameteriNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPathParameterivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPathStencilDepthOffsetNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPathStencilFuncNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPathTexGenNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glPauseTransformFeedbackNV, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glPointAlongPathNV, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glPointParameteriNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterivNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPresentFrameDualFillNV, 13);
 	duk_gl_bind_opengl_wrapper(ctx, glPresentFrameKeyedNV, 11);
 	duk_gl_bind_opengl_wrapper(ctx, glPrimitiveRestartIndexNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPrimitiveRestartNV, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramBufferParametersIivNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramBufferParametersIuivNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramBufferParametersfvNV, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameterI4iNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameterI4ivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameterI4uiNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParameterI4uivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParametersI4ivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramEnvParametersI4uivNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameterI4iNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameterI4ivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameterI4uiNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParameterI4uivNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParametersI4ivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramLocalParametersI4uivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramNamedParameter4dNV, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramNamedParameter4dvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramNamedParameter4fNV, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramNamedParameter4fvNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramParameter4dNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramParameter4dvNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramParameter4fNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramParameter4fvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramParameters4dvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramParameters4fvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramPathFragmentInputGenNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramSubroutineParametersuivNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1i64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1i64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1ui64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1ui64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2i64NV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2i64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2ui64NV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2ui64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3i64NV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3i64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3ui64NV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3ui64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4i64NV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4i64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4ui64NV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4ui64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformHandleui64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformHandleui64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformui64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformui64vNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramVertexLimitNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRenderbufferStorageMultisampleCoverageNV, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glRequestResidentProgramsNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glResolveDepthValuesNV, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glResumeTransformFeedbackNV, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glSampleMaskIndexedNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColorFormatNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glSetFenceNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glStateCaptureNV, 2);
@@ -2594,9 +4704,13 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glSubpixelPrecisionBiasNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTestFenceNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1hNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2hNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4hNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoordFormatNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexImage2DMultisampleCoverageNV, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glTexImage3DMultisampleCoverageNV, 8);
@@ -2607,58 +4721,125 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glTextureImage3DMultisampleCoverageNV, 9);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureImage3DMultisampleNV, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glTrackMatrixNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTransformFeedbackAttribsNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTransformFeedbackStreamAttribsNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glTransformFeedbackVaryingsNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTransformPathNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1i64NV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1i64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1ui64NV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1ui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2i64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2i64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2ui64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2ui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3i64NV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3i64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3ui64NV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3ui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4i64NV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4i64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4ui64NV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4ui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniformHandleui64NV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformHandleui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniformui64NV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformui64vNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVDPAUFiniNV, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex2hNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex3hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex4hNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4hvNV, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1dNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1dvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1fNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1fvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1hNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1sNV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1svNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2dNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2dvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2fNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2fvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2hNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2sNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2svNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3dNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3dvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3fNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3fvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3hNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3sNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3svNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4dNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4dvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4fNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4fvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4hNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4hvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4sNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4svNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4ubNV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4ubvNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribFormatNV, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribIFormatNV, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1i64NV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1i64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1ui64NV, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1ui64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2i64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2i64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2ui64NV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2ui64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3i64NV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3i64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3ui64NV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3ui64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4i64NV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4i64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4ui64NV, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4ui64vNV, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribLFormatNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs1dvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs1fvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs1hvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs1svNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs2dvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs2fvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs2hvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs2svNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs3dvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs3fvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs3hvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs3svNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs4dvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs4fvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs4hvNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs4svNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribs4ubvNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexFormatNV, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexWeighthNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexWeighthvNV, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glVideoCaptureNV, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVideoCaptureStreamParameterdvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVideoCaptureStreamParameterfvNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVideoCaptureStreamParameterivNV, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glWeightPathsNV, 4);
 #endif /* DUK_GL_NV */
 
 #ifdef DUK_GL_OPENGL_1_1
 	duk_gl_bind_opengl_wrapper(ctx, glAccum, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glAlphaFunc, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glAreTexturesResident, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glArrayElement, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBegin, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBindTexture, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glBitmap, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendFunc, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCallList, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClear, 1);
@@ -2667,22 +4848,39 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glClearDepth, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClearIndex, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClearStencil, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glClipPlane, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3b, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3bv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3ub, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3ubv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3uiv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor3us, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3usv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4b, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4bv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4ub, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4ubv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4uiv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4us, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4usv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glColorMask, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glColorMaterial, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyPixels, 5);
@@ -2692,6 +4890,7 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTexSubImage2D, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glCullFace, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteLists, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteTextures, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthFunc, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthMask, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthRange, 2);
@@ -2700,62 +4899,123 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArrays, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawBuffer, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEdgeFlag, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEdgeFlagv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEnable, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableClientState, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEnd, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glEndList, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1d, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1f, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalMesh1, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalMesh2, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalPoint1, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glEvalPoint2, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFeedbackBuffer, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFinish, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glFlush, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glFogf, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFogfv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFogi, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFogiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFrontFace, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFrustum, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glGenLists, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGenTextures, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBooleanv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetClipPlane, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDoublev, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGetError, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFloatv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetIntegerv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetLightfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetLightiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapdv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMapiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMaterialfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMaterialiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelMapfv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelMapuiv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPixelMapusv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetPolygonStipple, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexEnvfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexEnviv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexGendv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexGenfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexGeniv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexLevelParameterfv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexLevelParameteriv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glHint, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexMask, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexd, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexdv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexf, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexfv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexi, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexiv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexs, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexsv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIndexub, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glIndexubv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glInitNames, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glIsEnabled, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsList, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTexture, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLightModelf, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glLightModelfv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glLightModeli, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glLightModeliv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glLightf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glLightfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glLighti, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glLightiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glLineStipple, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glLineWidth, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glListBase, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLoadIdentity, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadMatrixd, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadMatrixf, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLoadName, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLogicOp, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMap1d, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glMap1f, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glMap2d, 10);
+	duk_gl_bind_opengl_wrapper(ctx, glMap2f, 10);
 	duk_gl_bind_opengl_wrapper(ctx, glMapGrid1d, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMapGrid1f, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMapGrid2d, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glMapGrid2f, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glMaterialf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMaterialfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMateriali, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMaterialiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMatrixMode, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultMatrixd, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultMatrixf, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNewList, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3b, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3bv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glOrtho, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glPassThrough, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelMapfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelMapuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glPixelMapusv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPixelStoref, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPixelStorei, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPixelTransferf, 2);
@@ -2764,91 +5024,157 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glPointSize, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPolygonMode, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPolygonOffset, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPolygonStipple, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPopAttrib, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glPopClientAttrib, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glPopMatrix, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glPopName, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glPrioritizeTextures, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glPushAttrib, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPushClientAttrib, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPushMatrix, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glPushName, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glReadBuffer, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRectd, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRectdv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRectf, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRectfv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRecti, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRectiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRects, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glRectsv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glRenderMode, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRotated, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glRotatef, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glScaled, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glScalef, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glScissor, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glSelectBuffer, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glShadeModel, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilFunc, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilMask, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilOp, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1d, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1f, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1i, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1s, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexEnvf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexEnvfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexEnvi, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexEnviv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexGend, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexGendv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexGenf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexGenfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexGeni, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexGeniv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexParameterf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTranslated, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTranslatef, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex2d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex2f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex2i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex2s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex2sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex3sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex4d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex4f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex4i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertex4s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertex4sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glViewport, 4);
 #endif /* DUK_GL_OPENGL_1_1 */
 
 #ifdef DUK_GL_OPENGL_1_2
 	duk_gl_bind_opengl_wrapper(ctx, glBlendColor, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquation, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glColorTableParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColorTableParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyColorSubTable, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyColorTable, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter1D, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter2D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTexSubImage3D, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetConvolutionParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetHistogramParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMinmaxParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMinmaxParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glHistogram, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glMinmax, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glResetHistogram, 1);
@@ -2858,22 +5184,42 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 #ifdef DUK_GL_OPENGL_1_3
 	duk_gl_bind_opengl_wrapper(ctx, glActiveTexture, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClientActiveTexture, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadTransposeMatrixd, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glLoadTransposeMatrixf, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultTransposeMatrixd, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultTransposeMatrixf, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1sv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2sv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3sv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4d, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4f, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4i, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4s, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4sv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glSampleCoverage, 2);
 #endif /* DUK_GL_OPENGL_1_3 */
 
@@ -2882,31 +5228,60 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquation, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparate, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glFogCoordd, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFogCoorddv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFogCoordf, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glFogCoordfv, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiDrawArrays, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glPointParameterf, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPointParameteri, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glPointParameteriv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3b, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3bv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3ub, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3ubv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3uiv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3us, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColor3usv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos2sv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3dv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3fv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3iv, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glWindowPos3sv, 1);
 #endif /* DUK_GL_OPENGL_1_4 */
 
 #ifdef DUK_GL_OPENGL_1_5
 	duk_gl_bind_opengl_wrapper(ctx, glBeginQuery, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindBuffer, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteBuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteQueries, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEndQuery, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGenBuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenQueries, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBufferParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjectiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjectuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsBuffer, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsQuery, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glUnmapBuffer, 1);
@@ -2923,39 +5298,97 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteShader, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDetachShader, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexAttribArray, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glDrawBuffers, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableVertexAttribArray, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveAttrib, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveUniform, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glGetAttachedShaders, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glGetAttribLocation, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramInfoLog, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetShaderInfoLog, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetShaderSource, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetShaderiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetUniformLocation, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribdv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsProgram, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsShader, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLinkProgram, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glShaderSource, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilFuncSeparate, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilMaskSeparate, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glStencilOpSeparate, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1fv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1iv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2fv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2iv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3fv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3iv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4f, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4fv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4i, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4iv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4fv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glUseProgram, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glValidateProgram, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1f, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1s, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib1sv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2s, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib2sv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3fv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3s, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib3sv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Nbv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Niv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Nsv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Nub, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Nubv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Nuiv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4Nusv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4bv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4d, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4f, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4fv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4s, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4sv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4ubv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4uiv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttrib4usv, 2);
 #endif /* DUK_GL_OPENGL_2_0 */
+
+#ifdef DUK_GL_OPENGL_2_1
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2x3fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2x4fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3x2fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3x4fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4x2fv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4x3fv, 4);
+#endif /* DUK_GL_OPENGL_2_1 */
 
 #ifdef DUK_GL_OPENGL_3_0
 	duk_gl_bind_opengl_wrapper(ctx, glBeginConditionalRender, 2);
@@ -2969,7 +5402,13 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glCheckFramebufferStatus, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClampColor, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glClearBufferfi, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glClearBufferfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glClearBufferiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glClearBufferuiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glColorMaski, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteFramebuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteRenderbuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteVertexArrays, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisablei, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEnablei, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glEndConditionalRender, 0);
@@ -2979,31 +5418,68 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTexture2D, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTexture3D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureLayer, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGenFramebuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenRenderbuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenVertexArrays, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateMipmap, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBooleani_v, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetFragDataLocation, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFramebufferAttachmentParameteriv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetIntegeri_v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetRenderbufferParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameterIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTexParameterIuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTransformFeedbackVarying, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribIuiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsEnabledi, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsFramebuffer, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsRenderbuffer, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glIsVertexArray, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glRenderbufferStorage, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glRenderbufferStorageMultisample, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTexParameterIuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTransformFeedbackVaryings, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4ui, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1i, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI1uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI2uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3iv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI3uiv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4bv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4i, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4iv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4sv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4ubv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4ui, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4uiv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribI4usv, 2);
 #endif /* DUK_GL_OPENGL_3_0 */
 
 #ifdef DUK_GL_OPENGL_3_1
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysInstanced, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveUniformBlockName, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveUniformBlockiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveUniformName, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveUniformsiv, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glGetUniformBlockIndex, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformIndices, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glPrimitiveRestartIndex, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexBuffer, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniformBlockBinding, 3);
@@ -3011,6 +5487,10 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 
 #ifdef DUK_GL_OPENGL_3_2
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTexture, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetBufferParameteri64v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInteger64i_v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInteger64v, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetMultisamplefv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProvokingVertex, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSampleMaski, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexImage2DMultisample, 6);
@@ -3021,30 +5501,61 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glBindFragDataLocationIndexed, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glBindSampler, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColorP3ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glColorP3uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColorP4ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glColorP4uiv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteSamplers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenSamplers, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glGetFragDataIndex, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjecti64v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryObjectui64v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSamplerParameterIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSamplerParameterIuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSamplerParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetSamplerParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsSampler, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP1ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP1uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP2ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP2uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP3ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP3uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP4ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoordP4uiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glNormalP3ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glNormalP3uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glQueryCounter, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glSamplerParameterIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSamplerParameterIuiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glSamplerParameterf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSamplerParameterfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glSamplerParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glSamplerParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColorP3ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glSecondaryColorP3uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP1ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP1uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP2ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP2uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP3ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP3uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP4ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoordP4uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribDivisor, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP1ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP1uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP2ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP2uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP3ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP3uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP4ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribP4uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexP2ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexP2uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexP3ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexP3uiv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexP4ui, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexP4uiv, 2);
 #endif /* DUK_GL_OPENGL_3_3 */
 
 #ifdef DUK_GL_OPENGL_4_0
@@ -3054,55 +5565,131 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationi, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparatei, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glBlendFunci, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteTransformFeedbacks, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedback, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedbackStream, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glEndQueryIndexed, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenTransformFeedbacks, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveSubroutineName, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveSubroutineUniformName, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveSubroutineUniformiv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramStageiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetQueryIndexediv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glGetSubroutineIndex, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetSubroutineUniformLocation, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformSubroutineuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetUniformdv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsTransformFeedback, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glMinSampleShading, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPatchParameterfv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPatchParameteri, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glPauseTransformFeedback, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glResumeTransformFeedback, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform1d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform1dv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform2d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform2dv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform3d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform3dv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUniform4d, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glUniform4dv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2x3dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix2x4dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3x2dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix3x4dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4x2dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformMatrix4x3dv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glUniformSubroutinesuiv, 3);
 #endif /* DUK_GL_OPENGL_4_0 */
 
 #ifdef DUK_GL_OPENGL_4_1
 	duk_gl_bind_opengl_wrapper(ctx, glActiveShaderProgram, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glBindProgramPipeline, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glClearDepthf, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateShaderProgramv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glDeleteProgramPipelines, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glDepthRangeArrayv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthRangeIndexed, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glDepthRangef, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGenProgramPipelines, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDoublei_v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFloati_v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramPipelineInfoLog, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramPipelineiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetShaderPrecisionFormat, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexAttribLdv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glIsProgramPipeline, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramParameteri, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1dv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1f, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1fv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1i, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1iv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1ui, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform1uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2dv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2f, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2fv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2i, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2iv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2ui, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform2uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3d, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3dv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3f, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3fv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3i, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3iv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3ui, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform3uiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4d, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4dv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4f, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4fv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4i, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4iv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4ui, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniform4uiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x3dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x3fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x4dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix2x4fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x2dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x2fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x4dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix3x4fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x2dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x2fv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x3dv, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glProgramUniformMatrix4x3fv, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glReleaseShaderCompiler, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glScissorArrayv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glScissorIndexed, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glScissorIndexedv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glUseProgramStages, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glValidateProgramPipeline, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1d, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL1dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2d, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL2dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3d, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL3dv, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4d, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribL4dv, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glViewportArrayv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glViewportIndexedf, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glViewportIndexedfv, 2);
 #endif /* DUK_GL_OPENGL_4_1 */
 
 #ifdef DUK_GL_OPENGL_4_2
@@ -3110,6 +5697,8 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glDrawArraysInstancedBaseInstance, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedbackInstanced, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawTransformFeedbackStreamInstanced, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetActiveAtomicCounterBufferiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInternalformativ, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glMemoryBarrier, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexStorage1D, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTexStorage2D, 5);
@@ -3118,13 +5707,23 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 
 #ifdef DUK_GL_OPENGL_4_3
 	duk_gl_bind_opengl_wrapper(ctx, glCopyImageSubData, 15);
+	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageControl, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsert, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glDispatchCompute, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFramebufferParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetDebugMessageLog, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFramebufferParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetInternalformati64v, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetObjectLabel, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramInterfaceiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceIndex, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceLocation, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceLocationIndex, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceName, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glGetProgramResourceiv, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glInvalidateBufferData, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glInvalidateFramebuffer, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glInvalidateSubFramebuffer, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glInvalidateTexImage, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glInvalidateTexSubImage, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glObjectLabel, 4);
@@ -3141,90 +5740,71 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glVertexBindingDivisor, 2);
 #endif /* DUK_GL_OPENGL_4_3 */
 
+#ifdef DUK_GL_OPENGL_4_4
+	duk_gl_bind_opengl_wrapper(ctx, glBindBuffersBase, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glBindImageTextures, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBindSamplers, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glBindTextures, 3);
+#endif /* DUK_GL_OPENGL_4_4 */
+
 #ifdef DUK_GL_OPENGL_4_5
-	duk_gl_bind_opengl_wrapper(ctx, glAccumxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glAlphaFuncxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glBeginConditionalRenderNVX, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glBeginPerfMonitorAMD, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glBindTextureUnit, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glBindVertexArrayAPPLE, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendBarrierKHR, 0);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendColorxOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationIndexedAMD, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendEquationSeparateIndexedAMD, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncIndexedAMD, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparateINGR, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glBlendFuncSeparateIndexedAMD, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glBlitNamedFramebuffer, 12);
-	duk_gl_bind_opengl_wrapper(ctx, glBufferParameteriAPPLE, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glCheckNamedFramebufferStatus, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glClearAccumxOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glClearColorxOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glClearDepthfOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glClearDepthxOES, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glClearNamedFramebufferfi, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glClearNamedFramebufferfv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glClearNamedFramebufferiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glClearNamedFramebufferuiv, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glClipControl, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glColor3xOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glColor4xOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterf, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameteri, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glConvolutionParameterxOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyColorSubTable, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyColorTable, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter1D, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glCopyConvolutionFilter2D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage1D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage2D, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyTextureSubImage3D, 9);
-	duk_gl_bind_opengl_wrapper(ctx, glDebugMessageInsertAMD, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glDepthRangefOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glDepthRangexOES, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateBuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateFramebuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateProgramPipelines, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateQueries, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateRenderbuffers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateSamplers, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateTextures, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateTransformFeedbacks, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glCreateVertexArrays, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexArrayAttrib, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glDisableVertexAttribAPPLE, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glDrawElementArrayAPPLE, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glDrawRangeElementArrayAPPLE, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glEnableVertexArrayAttrib, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glEnableVertexAttribAPPLE, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glEndConditionalRenderNVX, 0);
-	duk_gl_bind_opengl_wrapper(ctx, glEndPerfMonitorAMD, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord1xOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glEvalCoord2xOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glFinishFenceAPPLE, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glFinishObjectAPPLE, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glFinishTextureSUNX, 0);
-	duk_gl_bind_opengl_wrapper(ctx, glFogxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glFrameTerminatorGREMEDY, 0);
-	duk_gl_bind_opengl_wrapper(ctx, glFramebufferTextureMultiviewOVR, 6);
-	duk_gl_bind_opengl_wrapper(ctx, glFrustumfOES, 6);
-	duk_gl_bind_opengl_wrapper(ctx, glFrustumxOES, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glGenerateTextureMipmap, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGetGraphicsResetStatus, 0);
-	duk_gl_bind_opengl_wrapper(ctx, glGetMaterialxOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glHintPGI, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glHistogram, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glIndexxOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glIsFenceAPPLE, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glIsNameAMD, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glIsVertexArrayAPPLE, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glIsVertexAttribEnabledAPPLE, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glLightModelxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glLightxOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glLineWidthxOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glMap1xOES, 6);
-	duk_gl_bind_opengl_wrapper(ctx, glMap2xOES, 10);
-	duk_gl_bind_opengl_wrapper(ctx, glMapGrid1xOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMapGrid2xOES, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glMaterialxOES, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedBufferParameteri64v, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedBufferParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedFramebufferAttachmentParameteriv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedFramebufferParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetNamedRenderbufferParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureLevelParameterfv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureLevelParameteriv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterIuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameterfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTextureParameteriv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTransformFeedbacki64_v, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTransformFeedbacki_v, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetTransformFeedbackiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexArrayIndexed64iv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexArrayIndexediv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetVertexArrayiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnMapdv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnMapfv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnMapiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPixelMapfv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPixelMapuiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPixelMapusv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnPolygonStipple, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformdv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformfv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glGetnUniformuiv, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glInvalidateNamedFramebufferData, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glInvalidateNamedFramebufferSubData, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glMemoryBarrierByRegion, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glMinmax, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1bOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord1xOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2bOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord2xOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3bOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord3xOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4bOES, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glMultiTexCoord4xOES, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferDrawBuffer, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferDrawBuffers, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferParameteri, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferReadBuffer, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferRenderbuffer, 4);
@@ -3232,108 +5812,85 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glNamedFramebufferTextureLayer, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedRenderbufferStorage, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glNamedRenderbufferStorageMultisample, 5);
-	duk_gl_bind_opengl_wrapper(ctx, glNormal3xOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glObjectPurgeableAPPLE, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glObjectUnpurgeableAPPLE, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glOrthofOES, 6);
-	duk_gl_bind_opengl_wrapper(ctx, glOrthoxOES, 6);
-	duk_gl_bind_opengl_wrapper(ctx, glPassThroughxOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glPixelStorex, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenParameterfSGIS, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenParameteriSGIS, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glPixelTransferxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glPixelZoomxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glPointParameterfSGIS, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glPointSizexOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glPolygonOffsetxOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glQueryObjectParameteruiAMD, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glRasterPos2xOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glRasterPos3xOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glRasterPos4xOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glRectxOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glResetHistogram, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glResetMinmax, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glRotatexOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glSampleMaskSGIS, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glSamplePatternSGIS, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glScalexOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glSetFenceAPPLE, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glStencilOpValueAMD, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glTbufferMask3DFX, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glTessellationFactorAMD, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glTessellationModeAMD, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glTestFenceAPPLE, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glTestObjectAPPLE, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1bOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord1xOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2bOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2xOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3bOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord3xOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4bOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4xOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glTexEnvxOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTexGenxOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTexParameterxOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTexStorageSparseAMD, 7);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureBarrier, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureBuffer, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTextureColorMaskSGIS, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterIiv, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterIuiv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterf, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameterfv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureParameteri, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glTextureParameteriv, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage1D, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage2D, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage2DMultisample, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage3D, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glTextureStorage3DMultisample, 7);
-	duk_gl_bind_opengl_wrapper(ctx, glTextureStorageSparseAMD, 8);
 	duk_gl_bind_opengl_wrapper(ctx, glTransformFeedbackBufferBase, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glTranslatexOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glUnmapNamedBuffer, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glVertex2bOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glVertex2xOES, 1);
-	duk_gl_bind_opengl_wrapper(ctx, glVertex3bOES, 3);
-	duk_gl_bind_opengl_wrapper(ctx, glVertex3xOES, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glVertex4bOES, 4);
-	duk_gl_bind_opengl_wrapper(ctx, glVertex4xOES, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayAttribBinding, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayAttribFormat, 6);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayAttribIFormat, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayAttribLFormat, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayBindingDivisor, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayElementBuffer, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glVertexArrayParameteriAPPLE, 2);
-	duk_gl_bind_opengl_wrapper(ctx, glVertexAttribParameteriAMD, 3);
 #endif /* DUK_GL_OPENGL_4_5 */
 
 #ifdef DUK_GL_SGI
+	duk_gl_bind_opengl_wrapper(ctx, glColorTableParameterfvSGI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glColorTableParameterivSGI, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glCopyColorTableSGI, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glFinishTextureSUNX, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameterfvSGI, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetColorTableParameterivSGI, 3);
 #endif /* DUK_GL_SGI */
 
 #ifdef DUK_GL_SGIX
 	duk_gl_bind_opengl_wrapper(ctx, glAsyncMarkerSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glDeformSGIX, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glDeformationMap3dSGIX, 14);
+	duk_gl_bind_opengl_wrapper(ctx, glDeformationMap3fSGIX, 14);
 	duk_gl_bind_opengl_wrapper(ctx, glDeleteAsyncMarkersSGIX, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFinishAsyncSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glFlushRasterSGIX, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentColorMaterialSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightModelfSGIX, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightModelfvSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightModeliSGIX, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightModelivSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightfSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightfvSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightiSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glFragmentLightivSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentMaterialfSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glFragmentMaterialfvSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFragmentMaterialiSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glFragmentMaterialivSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glFrameZoomSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGenAsyncMarkersSGIX, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragmentLightfvSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragmentLightivSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragmentMaterialfvSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetFragmentMaterialivSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glGetInstrumentsSGIX, 0);
+	duk_gl_bind_opengl_wrapper(ctx, glGetListParameterfvSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glGetListParameterivSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glInstrumentsBufferSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glIsAsyncMarkerSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glLightEnviSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glListParameterfSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glListParameterfvSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glListParameteriSGIX, 3);
+	duk_gl_bind_opengl_wrapper(ctx, glListParameterivSGIX, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glLoadIdentityDeformationMapSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glPixelTexGenSGIX, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPollAsyncSGIX, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glPollInstrumentsSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glReadInstrumentsSGIX, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glReferencePlaneSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glSpriteParameterfSGIX, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glSpriteParameterfvSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glSpriteParameteriSGIX, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glSpriteParameterivSGIX, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glStartInstrumentsSGIX, 0);
 	duk_gl_bind_opengl_wrapper(ctx, glStopInstrumentsSGIX, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTagSampleBufferSGIX, 0);
@@ -3341,9 +5898,13 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 
 #ifdef DUK_GL_SUN
 	duk_gl_bind_opengl_wrapper(ctx, glColor3fVertex3fSUN, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glColor3fVertex3fvSUN, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4fNormal3fVertex3fSUN, 10);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4fNormal3fVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4ubVertex2fSUN, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4ubVertex2fvSUN, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glColor4ubVertex3fSUN, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glColor4ubVertex3fvSUN, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glDrawMeshArraysSUN, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glGlobalAlphaFactorbSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGlobalAlphaFactordSUN, 1);
@@ -3354,24 +5915,43 @@ void duk_gl_bind_opengl_functions(duk_context *ctx)
 	duk_gl_bind_opengl_wrapper(ctx, glGlobalAlphaFactoruiSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glGlobalAlphaFactorusSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glNormal3fVertex3fSUN, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glNormal3fVertex3fvSUN, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeubSUN, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeubvSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiColor3fVertex3fSUN, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiColor3fVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiColor4fNormal3fVertex3fSUN, 11);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiColor4fNormal3fVertex3fvSUN, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiColor4ubVertex3fSUN, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiColor4ubVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiNormal3fVertex3fSUN, 7);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiNormal3fVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fSUN, 13);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiTexCoord2fColor4fNormal3fVertex3fvSUN, 5);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiTexCoord2fNormal3fVertex3fSUN, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiTexCoord2fNormal3fVertex3fvSUN, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiTexCoord2fVertex3fSUN, 6);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiTexCoord2fVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiVertex3fSUN, 4);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuiVertex3fvSUN, 2);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeuivSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeusSUN, 1);
+	duk_gl_bind_opengl_wrapper(ctx, glReplacementCodeusvSUN, 1);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fColor3fVertex3fSUN, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fColor3fVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fColor4fNormal3fVertex3fSUN, 12);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fColor4fNormal3fVertex3fvSUN, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fColor4ubVertex3fSUN, 9);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fColor4ubVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fNormal3fVertex3fSUN, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fNormal3fVertex3fvSUN, 3);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fVertex3fSUN, 5);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord2fVertex3fvSUN, 2);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4fColor4fNormal3fVertex4fSUN, 15);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4fColor4fNormal3fVertex4fvSUN, 4);
 	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4fVertex4fSUN, 8);
+	duk_gl_bind_opengl_wrapper(ctx, glTexCoord4fVertex4fvSUN, 2);
 #endif /* DUK_GL_SUN */
 
 }
@@ -3387,15 +5967,24 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_ADD_SIGNED_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA16F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA32F_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_FLOAT16_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_FLOAT32_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_ARRAY_BUFFER_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_ARRAY_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_AUX_DEPTH_STENCIL_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_ADVANCED_COHERENT_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_EQUATION);
 	duk_gl_push_opengl_constant_property(ctx, GL_BOOL_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_BOOL_VEC2_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_BOOL_VEC3_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_BOOL_VEC4_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_ACCESS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_FLUSHING_UNMAP_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_MAPPED_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_MAP_POINTER_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_OBJECT_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_SERIALIZED_MODIFY_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_USAGE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_FRAGMENT_COLOR_ARB);
@@ -3405,8 +5994,24 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIENT_ACTIVE_TEXTURE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIPPING_INPUT_PRIMITIVES_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIPPING_OUTPUT_PRIMITIVES_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLORBURN_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLORDODGE_KHR);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_FLOAT_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX_STACK_DEPTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_SUM_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_ALPHA_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BLUE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_GREEN_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_INTENSITY_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_LUMINANCE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_RED_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_WIDTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_ALPHA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMBINE_RGB_ARB);
@@ -3418,15 +6023,32 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_LUMINANCE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGBA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGBA_BPTC_UNORM_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGBA_FXT1_3DFX);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB_BPTC_SIGNED_FLOAT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB_FXT1_3DFX);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_TEXTURE_FORMATS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPUTE_SHADER_INVOCATIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_BORDER);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_FLAG_NO_ERROR_BIT_KHR);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_FLAG_ROBUST_ACCESS_BIT_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_ROBUST_ACCESS);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONTINUOUS_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_1D);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_2D);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_COLOR);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_MODE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_HEIGHT);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_WIDTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_COORD_REPLACE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_COUNTER_RANGE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_COUNTER_TYPE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_CURRENT_MATRIX_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CURRENT_MATRIX_INDEX_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CURRENT_MATRIX_STACK_DEPTH_ARB);
@@ -3434,13 +6056,27 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_CURRENT_QUERY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CURRENT_VERTEX_ATTRIB_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_CURRENT_WEIGHT_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DARKEN_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_DATA_BUFFER_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CALLBACK_FUNCTION_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CALLBACK_USER_PARAM_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_API_ERROR_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_APPLICATION_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_DEPRECATION_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_OTHER_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_PERFORMANCE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_SHADER_COMPILER_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_UNDEFINED_BEHAVIOR_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_WINDOW_SYSTEM_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_LOGGED_MESSAGES_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_LOGGED_MESSAGES_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_NEXT_LOGGED_MESSAGE_LENGTH_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_HIGH_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_HIGH_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_LOW_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_LOW_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_MEDIUM_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_MEDIUM_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SOURCE_API_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SOURCE_APPLICATION_ARB);
@@ -3454,10 +6090,14 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_TYPE_PERFORMANCE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_TYPE_PORTABILITY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_CLAMP_FAR_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_CLAMP_NEAR_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_COMPONENT16_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_COMPONENT24_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_COMPONENT32_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_TEXTURE_MODE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DIFFERENCE_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_DISCRETE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGBA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGB_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_BUFFER0_ARB);
@@ -3476,12 +6116,22 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_BUFFER7_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_BUFFER8_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_BUFFER9_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_PIXELS_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_DYNAMIC_COPY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DYNAMIC_DRAW_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DYNAMIC_READ_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_EDGE_FLAG_ARRAY_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_BUFFER_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_POINTER_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_TYPE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_EXCLUSION_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_FACTOR_MAX_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_FACTOR_MIN_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_FENCE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_FIXED_OES);
 	duk_gl_push_opengl_constant_property(ctx, GL_FIXED_ONLY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_FLOAT_MAT2_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_FLOAT_MAT3_ARB);
@@ -3505,7 +6155,24 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_GEOMETRY_SHADER_PRIMITIVES_EMITTED_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_GEOMETRY_VERTICES_OUT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_GUILTY_CONTEXT_RESET_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_HALF_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_HALF_FLOAT_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_HARDLIGHT_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_ALPHA_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_BLUE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_GREEN_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_LUMINANCE_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_RED_SIZE);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_SINK);
+	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_WIDTH);
+	duk_gl_push_opengl_constant_property(ctx, GL_HSL_COLOR_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_HSL_HUE_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_HSL_LUMINOSITY_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_HSL_SATURATION_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_IMPLEMENTATION_COLOR_READ_TYPE_OES);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_ARRAY_BUFFER_BINDING_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INNOCENT_CONTEXT_RESET_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INT64_ARB);
@@ -3514,11 +6181,16 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_INT64_VEC4_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY16F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY32F_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_FLOAT16_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_FLOAT32_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTERPOLATE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_INT_SAMPLER_BUFFER_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_INT_SAMPLER_CUBE_MAP_ARRAY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INT_VEC2_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INT_VEC3_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_INT_VEC4_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_LIGHTEN_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_LIGHT_MODEL_SPECULAR_VECTOR_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_LINES_ADJACENCY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_LINE_STRIP_ADJACENCY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_LOSE_CONTEXT_ON_RESET_ARB);
@@ -3526,6 +6198,10 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE32F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA16F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA32F_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_FLOAT16_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_FLOAT32_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_FLOAT16_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_FLOAT32_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX0_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX10_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX11_ARB);
@@ -3564,13 +6240,18 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX_INDEX_ARRAY_STRIDE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX_INDEX_ARRAY_TYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX_PALETTE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COLOR_MATRIX_STACK_DEPTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COMPUTE_FIXED_GROUP_INVOCATIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COMPUTE_FIXED_GROUP_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COMPUTE_VARIABLE_GROUP_INVOCATIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COMPUTE_VARIABLE_GROUP_SIZE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_HEIGHT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_WIDTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CUBE_MAP_TEXTURE_SIZE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DEBUG_LOGGED_MESSAGES_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DEBUG_LOGGED_MESSAGES_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DEBUG_MESSAGE_LENGTH_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DEBUG_MESSAGE_LENGTH_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DRAW_BUFFERS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_FRAGMENT_UNIFORM_COMPONENTS_ARB);
@@ -3605,8 +6286,11 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_PROGRAM_TEX_INSTRUCTIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_RECTANGLE_TEXTURE_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SHADER_COMPILER_THREADS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_3D_TEXTURE_SIZE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_3D_TEXTURE_SIZE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_ARRAY_TEXTURE_LAYERS);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_ARRAY_TEXTURE_LAYERS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_TEXTURE_SIZE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_TEXTURE_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TEXTURE_BUFFER_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TEXTURE_COORDS_ARB);
@@ -3618,8 +6302,13 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_UNIFORM_COMPONENTS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_UNITS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_VARYING_COMPONENTS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_FORMAT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_SINK);
+	duk_gl_push_opengl_constant_property(ctx, GL_MIN_LOD_WARNING_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_MIN_PROGRAM_TEXTURE_GATHER_OFFSET_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MIN_SAMPLE_SHADING_VALUE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MIN_SPARSE_LEVEL_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_MIRRORED_REPEAT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MODELVIEW0_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MODELVIEW10_ARB);
@@ -3653,7 +6342,10 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MODELVIEW7_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MODELVIEW8_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MODELVIEW9_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MULTIPLY_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_3DFX);
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_BIT_3DFX);
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_BIT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_LINE_WIDTH_GRANULARITY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_LINE_WIDTH_RANGE_ARB);
@@ -3678,14 +6370,32 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_SUBTYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_TYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_VALIDATE_STATUS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_OCCLUSION_QUERY_EVENT_MASK_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND0_ALPHA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND0_RGB_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND1_ALPHA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND1_RGB_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND2_ALPHA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_OPERAND2_RGB_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_OVERLAY_KHR);
+	duk_gl_push_opengl_constant_property(ctx, GL_PACK_ROW_BYTES_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_R5_G6_B5_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGB5_A1_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGB8_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGBA4_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGBA8_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_R5_G6_B5_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGB5_A1_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGB8_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGBA4_OES);
+	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGBA8_OES);
 	duk_gl_push_opengl_constant_property(ctx, GL_PARAMETER_BUFFER_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PARAMETER_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_PERCENTAGE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_PERFMON_RESULT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_PERFMON_RESULT_AVAILABLE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_PERFMON_RESULT_SIZE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_PERFORMANCE_MONITOR_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_PACK_BUFFER_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_PACK_BUFFER_BINDING_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_UNPACK_BUFFER_ARB);
@@ -3695,6 +6405,24 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MAX_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MIN_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SPRITE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_SCALE);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_BIAS);
+	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_SCALE);
 	duk_gl_push_opengl_constant_property(ctx, GL_PREVIOUS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PRIMARY_COLOR_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PRIMITIVES_SUBMITTED_ARB);
@@ -3727,21 +6455,46 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_PROGRAM_TEX_INDIRECTIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROGRAM_TEX_INSTRUCTIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROGRAM_UNDER_NATIVE_LIMITS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_HISTOGRAM);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_COLOR_MATRIX_COLOR_TABLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_CONVOLUTION_COLOR_TABLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_CUBE_MAP_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_CUBE_MAP_ARRAY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_RECTANGLE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_PURGEABLE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_ALL_EVENT_BITS_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_BUFFER_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_BUFFER_BINDING_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_COUNTER_BITS_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_DEPTH_BOUNDS_FAIL_EVENT_BIT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_DEPTH_FAIL_EVENT_BIT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_DEPTH_PASS_EVENT_BIT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_OBJECT_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_RESULT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_RESULT_AVAILABLE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_RESULT_NO_WAIT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_STENCIL_FAIL_EVENT_BIT_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_READ_ONLY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_READ_WRITE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_REDUCE);
 	duk_gl_push_opengl_constant_property(ctx, GL_REFLECTION_MAP_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_RELEASED_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_REPLACE_VALUE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_REPLICATE_BORDER);
 	duk_gl_push_opengl_constant_property(ctx, GL_RESET_NOTIFICATION_STRATEGY_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_RETAINED_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB16F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB32F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA16F_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA32F_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_FLOAT16_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_FLOAT32_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_FLOAT_MODE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_422_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_FLOAT16_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_FLOAT32_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_RAW_422_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB_SCALE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_1D_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_1D_SHADOW_ARB);
@@ -3750,13 +6503,17 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_2D_RECT_SHADOW_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_2D_SHADOW_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_3D_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_BUFFER_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_CUBE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_CUBE_MAP_ARRAY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_OBJECT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_3DFX);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_PASSED_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_COVERAGE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_ONE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS_3DFX);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_COVERAGE_INVERT_ARB);
@@ -3766,10 +6523,14 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_LOCATION_PIXEL_GRID_WIDTH_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_LOCATION_SUBPIXEL_BITS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_SHADING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SCREEN_KHR);
 	duk_gl_push_opengl_constant_property(ctx, GL_SECONDARY_COLOR_ARRAY_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SEPARABLE_2D);
+	duk_gl_push_opengl_constant_property(ctx, GL_SET_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_SHADER_INCLUDE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SHADER_OBJECT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SHADING_LANGUAGE_VERSION_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SOFTLIGHT_KHR);
 	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE0_ALPHA_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE0_RGB_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SOURCE1_ALPHA_ARB);
@@ -3783,12 +6544,23 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_STATIC_COPY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_STATIC_DRAW_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_STATIC_READ_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_BACK_OP_VALUE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_OP_VALUE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_CACHED_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_CLIENT_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_PRIVATE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_SHARED_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_STREAM_COPY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_STREAM_DRAW_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_STREAM_RASTERIZATION_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_STREAM_READ_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_SUBSAMPLE_DISTANCE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_SUBTRACT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SYNC_CL_EVENT_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_SYNC_CL_EVENT_COMPLETE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TABLE_TOO_LARGE);
+	duk_gl_push_opengl_constant_property(ctx, GL_TESSELLATION_FACTOR_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_TESSELLATION_MODE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_TESS_CONTROL_SHADER_PATCHES_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TESS_EVALUATION_SHADER_INVOCATIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE0_ARB);
@@ -3852,12 +6624,17 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_GREEN_TYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_INTENSITY_TYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_LUMINANCE_TYPE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RANGE_LENGTH_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RANGE_POINTER_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RECTANGLE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_REDUCTION_MODE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RED_TYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_SPARSE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_STORAGE_HINT_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_STORAGE_SPARSE_BIT_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSFORM_FEEDBACK_OVERFLOW_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSFORM_FEEDBACK_STREAM_OVERFLOW_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_TRANSFORM_HINT_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_COLOR_MATRIX_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_CURRENT_MATRIX_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_MODELVIEW_MATRIX_ARB);
@@ -3865,14 +6642,27 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSPOSE_TEXTURE_MATRIX_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRIANGLES_ADJACENCY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRIANGLE_STRIP_ADJACENCY_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNDEFINED_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNKNOWN_CONTEXT_RESET_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_CLIENT_STORAGE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_ROW_BYTES_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT64_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT64_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT64_VEC2_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT64_VEC3_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT64_VEC4_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_SAMPLER_BUFFER_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_NORMALIZED_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_8_8_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_8_8_REV_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_BINDING_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_BUFFER_BINDING_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_OBJECT_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_RANGE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_RANGE_LENGTH_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_RANGE_POINTER_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_STORAGE_HINT_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_DIVISOR_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_ENABLED_ARB);
@@ -3881,7 +6671,19 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_STRIDE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_TYPE_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_COEFF_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_DOMAIN_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_ORDER_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_SIZE_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_COEFF_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_DOMAIN_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_ORDER_APPLE);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_SIZE_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_BLEND_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ELEMENT_SWIZZLE_AMD);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ID_SWIZZLE_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_POINT_SIZE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_PROGRAM_TWO_SIDE_ARB);
@@ -3889,9 +6691,13 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_SHADER_INVOCATIONS_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTICES_SUBMITTED_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_INDEX_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_X_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_X_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_Y_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_Y_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_Z_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_Z_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_VOLATILE_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_WEIGHTED_AVERAGE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_WEIGHT_ARRAY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_WEIGHT_ARRAY_BUFFER_BINDING_ARB);
@@ -3901,6 +6707,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_WEIGHT_ARRAY_TYPE_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_WEIGHT_SUM_UNITY_ARB);
 	duk_gl_push_opengl_constant_property(ctx, GL_WRITE_ONLY_ARB);
+	duk_gl_push_opengl_constant_property(ctx, GL_YCBCR_422_APPLE);
 #endif /* DUK_GL_ARB */
 
 #ifdef DUK_GL_ATI
@@ -4095,37 +6902,54 @@ void duk_gl_set_constants(duk_context *ctx)
 
 #ifdef DUK_GL_EXT
 	duk_gl_push_opengl_constant_property(ctx, GL_1PASS_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_1PASS_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_2PASS_0_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_2PASS_0_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_2PASS_1_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_2PASS_1_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_422_AVERAGE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_422_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_422_REV_AVERAGE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_422_REV_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_0_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_0_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_1_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_1_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_2_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_2_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_3_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_3_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_ABGR_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ACTIVE_PROGRAM_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ACTIVE_STENCIL_FACE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ADD_SIGNED_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_FRG_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_MEM_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_OBJ_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_WIN_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALL_BARRIER_BITS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA12_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA16I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA16UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA16_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA16_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA32I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA32UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA4_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA8I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA8UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA8_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA8_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_INTEGER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_SNORM);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALWAYS_FAST_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALWAYS_SOFT_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_ARRAY_ELEMENT_LOCK_COUNT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ARRAY_ELEMENT_LOCK_FIRST_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ATOMIC_COUNTER_BARRIER_BIT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ATTENUATION_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_AVERAGE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_BACK_NORMALS_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_BGRA_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_BGRA_INTEGER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_BGR_EXT);
@@ -4145,9 +6969,15 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_BLUE_INTEGER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_OBJECT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_UPDATE_BARRIER_BIT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_BORDER_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_EDGE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_FAR_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_NEAR_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_VOLUME_CLIPPING_HINT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_CMYKA_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_CMYK_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR3_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_COLOR4_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_COUNT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_POINTER_EXT);
@@ -4202,6 +7032,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_SRGB_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_CONSERVE_MEMORY_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_ALPHA_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_COLOR_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_EXT);
@@ -4230,7 +7061,13 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_BOUNDS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_BOUNDS_TEST_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_STENCIL_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_2D_BINDING_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_2D_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_FUNC_POINTS_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_LEVEL_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_MODE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_DISTANCE_ATTENUATION_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_DISTANCE_ATTENUATION_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGBA_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGB_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOUBLE_MAT2_EXT);
@@ -4241,12 +7078,33 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_DOUBLE_VEC4_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_FRAMEBUFFER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_FRAMEBUFFER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA12_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA16_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY12_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY16_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE12_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE16_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE_ALPHA4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE_ALPHA8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_TEXTURE_SELECT_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_EDGEFLAG_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_EDGE_FLAG_ARRAY_COUNT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_EDGE_FLAG_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_EDGE_FLAG_ARRAY_POINTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_EDGE_FLAG_ARRAY_STRIDE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_EFFECTIVE_RASTER_SAMPLES_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_BARRIER_BIT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_EYE_DISTANCE_TO_LINE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_EYE_DISTANCE_TO_POINT_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_EYE_LINE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_EYE_POINT_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_FILTER4_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_FIRST_VERTEX_CONVENTION_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_ARRAY_POINTER_EXT);
@@ -4254,6 +7112,10 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_ARRAY_TYPE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_SOURCE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_FOG_FUNC_POINTS_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_FOG_FUNC_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_FORMAT_SUBSAMPLE_244_244_OML);
+	duk_gl_push_opengl_constant_property(ctx, GL_FORMAT_SUBSAMPLE_24_24_OML);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_COLOR_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_DEPTH_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_MATERIAL_EXT);
@@ -4262,9 +7124,11 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_3D_ZOFFSET_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_BASE_VIEW_INDEX_OVR);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_BARRIER_BIT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_COMPLETE_EXT);
@@ -4282,9 +7146,12 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_SRGB_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_UNSUPPORTED_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FULL_RANGE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_FULL_STIPPLE_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_ADD_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_REVERSE_SUBTRACT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_FUNC_SUBTRACT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_GENERATE_MIPMAP_HINT_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_GENERATE_MIPMAP_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_GEOMETRY_INPUT_TYPE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_GEOMETRY_OUTPUT_TYPE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_GEOMETRY_SHADER_EXT);
@@ -4322,6 +7189,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_ARRAY_POINTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_ARRAY_STRIDE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_ARRAY_TYPE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_MATERIAL_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_MATERIAL_FACE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_MATERIAL_PARAMETER_EXT);
@@ -4332,13 +7200,18 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY16I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY16UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY16_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY16_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY32I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY32UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY4_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY8I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY8UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY8_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY8_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_SNORM);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTERLACE_OML);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTERLACE_READ_OML);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTERLEAVED_ATTRIBS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTERPOLATE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INT_IMAGE_1D_ARRAY_EXT);
@@ -4364,12 +7237,19 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_INVARIANT_DATATYPE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INVARIANT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_INVARIANT_VALUE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_INVERTED_SCREEN_W_REND);
 	duk_gl_push_opengl_constant_property(ctx, GL_IUI_N3F_V2F_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_IUI_N3F_V3F_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_IUI_V2F_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_IUI_V3F_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LAST_VERTEX_CONVENTION_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LIGHT_MODEL_COLOR_CONTROL_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_DETAIL_ALPHA_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_DETAIL_COLOR_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_DETAIL_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_SHARPEN_ALPHA_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_SHARPEN_COLOR_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_SHARPEN_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_LINES_ADJACENCY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LINE_STRIP_ADJACENCY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LOCAL_CONSTANT_DATATYPE_EXT);
@@ -4382,7 +7262,9 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16_ALPHA16_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16_ALPHA16_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE32I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE32UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE4_ALPHA4_EXT);
@@ -4391,7 +7273,9 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8_ALPHA8_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8_ALPHA8_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA16I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA16UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA32I_EXT);
@@ -4399,13 +7283,24 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA8I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA8UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_INTEGER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_INTEGER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAP1_BINORMAL_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAP1_TANGENT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAP2_BINORMAL_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAP2_TANGENT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MATERIAL_SIDE_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_MATRIX_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_AMBIENT_AND_DIFFUSE_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_AMBIENT_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_COLOR_INDEXES_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_DIFFUSE_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_EMISSION_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_SHININESS_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAT_SPECULAR_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_3D_TEXTURE_SIZE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_4D_TEXTURE_SIZE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ARRAY_TEXTURE_LAYERS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_BINDABLE_UNIFORM_SIZE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COLOR_ATTACHMENTS_EXT);
@@ -4416,6 +7311,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ELEMENTS_INDICES_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_ELEMENTS_VERTICES_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_FOG_FUNC_POINTS_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_FRAGMENT_BINDABLE_UNIFORMS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_GEOMETRY_BINDABLE_UNIFORMS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_GEOMETRY_OUTPUT_VERTICES_EXT);
@@ -4443,12 +7339,14 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VARYING_COMPONENTS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_BINDABLE_UNIFORMS_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_SHADER_INSTRUCTIONS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_SHADER_INVARIANTS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_SHADER_LOCALS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_SHADER_LOCAL_CONSTANTS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_SHADER_VARIANTS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_VARYING_COMPONENTS_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VIEWS_OVR);
 	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_FORMAT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_SINK_EXT);
@@ -4466,7 +7364,11 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_BIT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_RASTERIZATION_ALLOWED_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_MVP_MATRIX_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_NATIVE_GRAPHICS_BEGIN_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_NATIVE_GRAPHICS_END_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_NATIVE_GRAPHICS_HANDLE_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_NEGATIVE_ONE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_NEGATIVE_W_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_NEGATIVE_X_EXT);
@@ -4478,7 +7380,12 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_ARRAY_POINTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_ARRAY_STRIDE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_ARRAY_TYPE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_MAP_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_DISTANCE_TO_LINE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_DISTANCE_TO_POINT_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_LINE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_POINT_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_ONE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ONE_MINUS_CONSTANT_ALPHA_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_ONE_MINUS_CONSTANT_COLOR_EXT);
@@ -4549,23 +7456,33 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_OUTPUT_TEXTURE_COORD9_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_OUTPUT_VERTEX_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PACK_CMYK_HINT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PACK_IMAGE_DEPTH_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_PACK_IMAGE_HEIGHT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PACK_RESAMPLE_OML);
 	duk_gl_push_opengl_constant_property(ctx, GL_PACK_SKIP_IMAGES_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PACK_SKIP_VOLUMES_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_PERTURB_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_BUFFER_BARRIER_BIT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_CUBIC_WEIGHT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_FRAGMENT_ALPHA_SOURCE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_FRAGMENT_RGB_SOURCE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_GROUP_COLOR_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_MAG_FILTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_MIN_FILTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_PACK_BUFFER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_PACK_BUFFER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_TEXTURE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_TRANSFORM_2D_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_TRANSFORM_2D_MATRIX_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_TRANSFORM_2D_STACK_DEPTH_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_UNPACK_BUFFER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_UNPACK_BUFFER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_POINT_FADE_THRESHOLD_SIZE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_POINT_FADE_THRESHOLD_SIZE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MAX_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MAX_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MIN_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MIN_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_POLYGON_OFFSET_BIAS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_POLYGON_OFFSET_CLAMP_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_POLYGON_OFFSET_EXT);
@@ -4578,6 +7495,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_SCALE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_BIAS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_SCALE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PREFER_DOUBLEBUFFER_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_PREVIOUS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PRIMARY_COLOR_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PRIMITIVES_GENERATED_EXT);
@@ -4593,8 +7511,16 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_2D_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_2D_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_3D_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_4D_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_CUBE_MAP_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUADS_FOLLOW_PROVOKING_VERTEX_CONVENTION_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_ALPHA4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_ALPHA8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_INTENSITY4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_INTENSITY8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_LUMINANCE4_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_LUMINANCE8_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_TEXTURE_SELECT_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_OBJECT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_R11F_G11F_B10F_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RASTERIZER_DISCARD_EXT);
@@ -4603,8 +7529,10 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_RASTER_SAMPLES_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_READ_FRAMEBUFFER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_READ_FRAMEBUFFER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RECLAIM_MEMORY_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_REDUCE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RED_INTEGER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RED_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_REFLECTION_MAP_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RENDERBUFFER_ALPHA_SIZE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RENDERBUFFER_BINDING_EXT);
@@ -4619,6 +7547,10 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_RENDERBUFFER_STENCIL_SIZE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RENDERBUFFER_WIDTH_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_REPLACE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_AVERAGE_OML);
+	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_DECIMATE_OML);
+	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_REPLICATE_OML);
+	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_ZERO_FILL_OML);
 	duk_gl_push_opengl_constant_property(ctx, GL_RESCALE_NORMAL_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB10_A2_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB10_EXT);
@@ -4630,6 +7562,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB32I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB32UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB4_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB4_S3TC);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB5_A1_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB5_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB8I_EXT);
@@ -4643,15 +7576,23 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA2_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA32I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA32UI_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA4_DXT5_S3TC);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA4_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA4_S3TC);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA8I_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA8UI_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA8_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_DXT5_S3TC);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_INTEGER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_INTEGER_MODE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_S3TC);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_SIGNED_COMPONENTS_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB_INTEGER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_S3TC);
 	duk_gl_push_opengl_constant_property(ctx, GL_RGB_SCALE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_RGB_SNORM);
+	duk_gl_push_opengl_constant_property(ctx, GL_RG_SNORM);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_1D_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_1D_ARRAY_SHADOW_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_2D_ARRAY_EXT);
@@ -4659,16 +7600,25 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_BUFFER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_CUBE_SHADOW_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_MASK_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_MASK_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_ONE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_ONE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_INVERT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_INVERT_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_VALUE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_VALUE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_PATTERN_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_PATTERN_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SCALAR_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SCALED_RESOLVE_FASTEST_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SCALED_RESOLVE_NICEST_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SCREEN_COORDINATES_REND);
 	duk_gl_push_opengl_constant_property(ctx, GL_SECONDARY_COLOR_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SECONDARY_COLOR_ARRAY_POINTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SECONDARY_COLOR_ARRAY_SIZE_EXT);
@@ -4681,6 +7631,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_SHADER_OBJECT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SHADOW_ATTENUATION_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SHARED_TEXTURE_PALETTE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_SHARPEN_TEXTURE_FUNC_POINTS_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_SINGLE_COLOR_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SKIP_DECODE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_SLUMINANCE8_ALPHA8_EXT);
@@ -4705,6 +7656,9 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_INDEX8_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_TAG_BITS_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_TEST_TWO_SIDE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_STRICT_DEPTHFUNC_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_STRICT_LIGHTING_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_STRICT_SCISSOR_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_SYNC_X11_FENCE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_T2F_IUI_N3F_V2F_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_T2F_IUI_N3F_V3F_EXT);
@@ -4715,14 +7669,22 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TANGENT_ARRAY_POINTER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TANGENT_ARRAY_STRIDE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TANGENT_ARRAY_TYPE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD1_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD2_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD3_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD4_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_1D_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_1D_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_2D_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_2D_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_3D_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_3D_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_4DSIZE_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_4D_BINDING_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_4D_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_ALPHA_SIZE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_APPLICATION_MODE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BASE_LEVEL_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_1D_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_2D_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BINDING_BUFFER_EXT);
@@ -4731,6 +7693,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BUFFER_DATA_STORE_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BUFFER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BUFFER_FORMAT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COLOR_WRITEMASK_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COORD_ARRAY_COUNT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COORD_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COORD_ARRAY_POINTER_EXT);
@@ -4746,6 +7709,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CUBE_MAP_POSITIVE_Z_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_DEPTH_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_FETCH_BARRIER_BIT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_FILTER4_SIZE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_FILTER_CONTROL_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_GREEN_SIZE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_INDEX_SIZE_EXT);
@@ -4756,6 +7720,9 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MATERIAL_FACE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MATERIAL_PARAMETER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_ANISOTROPY_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LEVEL_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LOD_SGIS);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MIN_LOD_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_NORMAL_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_PRIORITY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RED_SIZE_EXT);
@@ -4770,6 +7737,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_SWIZZLE_R_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_TOO_LARGE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_UPDATE_BARRIER_BIT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_WRAP_Q_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_WRAP_R_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TIME_ELAPSED_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRANSFORM_FEEDBACK_BARRIER_BIT_EXT);
@@ -4788,8 +7756,11 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_UNIFORM_BUFFER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNIFORM_BUFFER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_CMYK_HINT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_IMAGE_DEPTH_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_IMAGE_HEIGHT_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_RESAMPLE_OML);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_SKIP_IMAGES_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_SKIP_VOLUMES_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_BYTE_3_3_2_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_10F_11F_11F_REV_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_10_10_10_2_EXT);
@@ -4828,6 +7799,8 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_VARIANT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VARIANT_VALUE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VECTOR_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX23_BIT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX4_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_COUNT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_OBJECT_EXT);
@@ -4837,6 +7810,8 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_TYPE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_ARRAY_INTEGER_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_CONSISTENT_HINT_PGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_DATA_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_SHADER_BINDING_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_SHADER_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_SHADER_INSTRUCTIONS_EXT);
@@ -4851,6 +7826,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_WEIGHT_ARRAY_SIZE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_WEIGHT_ARRAY_STRIDE_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_WEIGHT_ARRAY_TYPE_EXT);
+	duk_gl_push_opengl_constant_property(ctx, GL_WIDE_LINE_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_W_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_X_EXT);
 	duk_gl_push_opengl_constant_property(ctx, GL_Y_EXT);
@@ -4887,6 +7863,10 @@ void duk_gl_set_constants(duk_context *ctx)
 
 #ifdef DUK_GL_IBM
 	duk_gl_push_opengl_constant_property(ctx, GL_ALL_STATIC_DATA_IBM);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_MAX_CLAMP_INGR);
+	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_MIN_CLAMP_INGR);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLUE_MAX_CLAMP_INGR);
+	duk_gl_push_opengl_constant_property(ctx, GL_BLUE_MIN_CLAMP_INGR);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_LIST_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_LIST_STRIDE_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_CULL_VERTEX_IBM);
@@ -4894,12 +7874,17 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_EDGE_FLAG_ARRAY_LIST_STRIDE_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_ARRAY_LIST_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_FOG_COORDINATE_ARRAY_LIST_STRIDE_IBM);
+	duk_gl_push_opengl_constant_property(ctx, GL_GREEN_MAX_CLAMP_INGR);
+	duk_gl_push_opengl_constant_property(ctx, GL_GREEN_MIN_CLAMP_INGR);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_ARRAY_LIST_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_ARRAY_LIST_STRIDE_IBM);
+	duk_gl_push_opengl_constant_property(ctx, GL_INTERLACE_READ_INGR);
 	duk_gl_push_opengl_constant_property(ctx, GL_MIRRORED_REPEAT_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_ARRAY_LIST_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_ARRAY_LIST_STRIDE_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_RASTER_POSITION_UNCLIPPED_IBM);
+	duk_gl_push_opengl_constant_property(ctx, GL_RED_MAX_CLAMP_INGR);
+	duk_gl_push_opengl_constant_property(ctx, GL_RED_MIN_CLAMP_INGR);
 	duk_gl_push_opengl_constant_property(ctx, GL_SECONDARY_COLOR_ARRAY_LIST_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_SECONDARY_COLOR_ARRAY_LIST_STRIDE_IBM);
 	duk_gl_push_opengl_constant_property(ctx, GL_STATIC_VERTEX_ARRAY_IBM);
@@ -4911,6 +7896,11 @@ void duk_gl_set_constants(duk_context *ctx)
 
 #ifdef DUK_GL_INTEL
 	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_ARRAY_PARALLEL_POINTERS_INTEL);
+	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX);
+	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX);
+	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_EVICTED_MEMORY_NVX);
+	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_EVICTION_COUNT_NVX);
+	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX);
 	duk_gl_push_opengl_constant_property(ctx, GL_LAYOUT_DEFAULT_INTEL);
 	duk_gl_push_opengl_constant_property(ctx, GL_LAYOUT_LINEAR_CPU_CACHED_INTEL);
 	duk_gl_push_opengl_constant_property(ctx, GL_LAYOUT_LINEAR_INTEL);
@@ -4936,6 +7926,12 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_PERFQUERY_QUERY_NAME_LENGTH_MAX_INTEL);
 	duk_gl_push_opengl_constant_property(ctx, GL_PERFQUERY_SINGLE_CONTEXT_INTEL);
 	duk_gl_push_opengl_constant_property(ctx, GL_PERFQUERY_WAIT_INTEL);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_1D_STACK_MESAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_2D_STACK_MESAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_1D_STACK_BINDING_MESAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_1D_STACK_MESAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_2D_STACK_BINDING_MESAX);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_2D_STACK_MESAX);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COORD_ARRAY_PARALLEL_POINTERS_INTEL);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MEMORY_LAYOUT_INTEL);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_PARALLEL_POINTERS_INTEL);
@@ -4947,6 +7943,7 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_CALLBACK_FUNC_MESA);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_CALLBACK_MESA);
 	duk_gl_push_opengl_constant_property(ctx, GL_FRAGMENT_PROGRAM_POSITION_MESA);
+	duk_gl_push_opengl_constant_property(ctx, GL_GLEXT_VERSION);
 	duk_gl_push_opengl_constant_property(ctx, GL_PACK_INVERT_MESA);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_ALL_BITS_MESA);
 	duk_gl_push_opengl_constant_property(ctx, GL_TRACE_ARRAYS_BIT_MESA);
@@ -6424,7 +9421,6 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGB);
 	duk_gl_push_opengl_constant_property(ctx, GL_DOT3_RGBA);
-	duk_gl_push_opengl_constant_property(ctx, GL_GLEXT_VERSION);
 	duk_gl_push_opengl_constant_property(ctx, GL_INTERPOLATE);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CUBE_MAP_TEXTURE_SIZE);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_TEXTURE_UNITS);
@@ -7633,446 +10629,28 @@ void duk_gl_set_constants(duk_context *ctx)
 #endif /* DUK_GL_OPENGL_4_4 */
 
 #ifdef DUK_GL_OPENGL_4_5
-	duk_gl_push_opengl_constant_property(ctx, GL_1PASS_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_2PASS_0_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_2PASS_1_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_0_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_1_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_2_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_4PASS_3_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_FRG_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_MEM_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_OBJ_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALLOW_DRAW_WIN_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA16_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA8_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_FLOAT16_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_FLOAT32_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_MAX_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_MIN_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALPHA_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALWAYS_FAST_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_ALWAYS_SOFT_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_AUX_DEPTH_STENCIL_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_BACK_NORMALS_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_ADVANCED_COHERENT_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLEND_EQUATION);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLUE_MAX_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_BLUE_MIN_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_FLUSHING_UNMAP_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_OBJECT_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_BUFFER_SERIALIZED_MODIFY_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_BORDER_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLAMP_TO_EDGE_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_DEPTH_MODE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_FAR_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_NEAR_HINT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_CLIP_ORIGIN);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR3_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR4_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLORBURN_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLORDODGE_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_FLOAT_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_MATRIX_STACK_DEPTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_ALPHA_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_BLUE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_GREEN_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_INTENSITY_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_LUMINANCE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_RED_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_COLOR_TABLE_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGBA_FXT1_3DFX);
-	duk_gl_push_opengl_constant_property(ctx, GL_COMPRESSED_RGB_FXT1_3DFX);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONSERVE_MEMORY_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONSTANT_BORDER);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_FLAG_NO_ERROR_BIT_KHR);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_FLAG_ROBUST_ACCESS_BIT);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_LOST);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_RELEASE_BEHAVIOR);
 	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_RELEASE_BEHAVIOR_FLUSH);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONTEXT_ROBUST_ACCESS);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONTINUOUS_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_1D);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_2D);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_COLOR);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_BORDER_MODE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FILTER_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_HEIGHT);
-	duk_gl_push_opengl_constant_property(ctx, GL_CONVOLUTION_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_COUNTER_RANGE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_COUNTER_TYPE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DARKEN_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_DATA_BUFFER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_API_ERROR_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_APPLICATION_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_DEPRECATION_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_OTHER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_PERFORMANCE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_SHADER_COMPILER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_UNDEFINED_BEHAVIOR_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_CATEGORY_WINDOW_SYSTEM_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_LOGGED_MESSAGES_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_HIGH_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_LOW_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEBUG_SEVERITY_MEDIUM_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_CLAMP_FAR_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DEPTH_CLAMP_NEAR_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_2D_BINDING_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_2D_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_FUNC_POINTS_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_LEVEL_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DETAIL_TEXTURE_MODE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DIFFERENCE_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_DISCRETE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_DISTANCE_ATTENUATION_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DRAW_PIXELS_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA12_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA16_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_ALPHA8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY12_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY16_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_INTENSITY8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE12_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE16_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE_ALPHA4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_LUMINANCE_ALPHA8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_DUAL_TEXTURE_SELECT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_EDGEFLAG_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_POINTER_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_ELEMENT_ARRAY_TYPE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_EXCLUSION_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_EYE_DISTANCE_TO_LINE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_EYE_DISTANCE_TO_POINT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_EYE_LINE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_EYE_POINT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_FACTOR_MAX_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_FACTOR_MIN_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_FENCE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_FILTER4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_FIXED_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_FOG_FUNC_POINTS_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_FOG_FUNC_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_FORMAT_SUBSAMPLE_244_244_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_FORMAT_SUBSAMPLE_24_24_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_BASE_VIEW_INDEX_OVR);
-	duk_gl_push_opengl_constant_property(ctx, GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR);
-	duk_gl_push_opengl_constant_property(ctx, GL_FULL_STIPPLE_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_GENERATE_MIPMAP_HINT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_GENERATE_MIPMAP_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX);
-	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX);
-	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_EVICTED_MEMORY_NVX);
-	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_EVICTION_COUNT_NVX);
-	duk_gl_push_opengl_constant_property(ctx, GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX);
-	duk_gl_push_opengl_constant_property(ctx, GL_GREEN_MAX_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_GREEN_MIN_CLAMP_INGR);
 	duk_gl_push_opengl_constant_property(ctx, GL_GUILTY_CONTEXT_RESET);
-	duk_gl_push_opengl_constant_property(ctx, GL_HALF_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HARDLIGHT_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_ALPHA_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_BLUE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_GREEN_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_LUMINANCE_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_RED_SIZE);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_SINK);
-	duk_gl_push_opengl_constant_property(ctx, GL_HISTOGRAM_WIDTH);
-	duk_gl_push_opengl_constant_property(ctx, GL_HSL_COLOR_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_HSL_HUE_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_HSL_LUMINOSITY_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_HSL_SATURATION_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_IMPLEMENTATION_COLOR_READ_FORMAT_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_IMPLEMENTATION_COLOR_READ_TYPE_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_INDEX_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_INNOCENT_CONTEXT_RESET);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY16_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY8_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_FLOAT16_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_FLOAT32_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTENSITY_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTERLACE_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTERLACE_READ_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_INTERLACE_READ_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_INT_SAMPLER_BUFFER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_INVERTED_SCREEN_W_REND);
-	duk_gl_push_opengl_constant_property(ctx, GL_LIGHTEN_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_LIGHT_MODEL_SPECULAR_VECTOR_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_DETAIL_ALPHA_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_DETAIL_COLOR_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_DETAIL_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_SHARPEN_ALPHA_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_SHARPEN_COLOR_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_LINEAR_SHARPEN_SGIS);
 	duk_gl_push_opengl_constant_property(ctx, GL_LOSE_CONTEXT_ON_RESET);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16_ALPHA16_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE16_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8_ALPHA8_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE8_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_FLOAT16_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_FLOAT32_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_ALPHA_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_FLOAT16_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_FLOAT32_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_LUMINANCE_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_MATERIAL_SIDE_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_AMBIENT_AND_DIFFUSE_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_AMBIENT_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_COLOR_INDEXES_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_DIFFUSE_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_EMISSION_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_SHININESS_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAT_SPECULAR_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_4D_TEXTURE_SIZE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COLOR_MATRIX_STACK_DEPTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_COMBINED_CLIP_AND_CULL_DISTANCES);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_HEIGHT);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CONVOLUTION_WIDTH);
 	duk_gl_push_opengl_constant_property(ctx, GL_MAX_CULL_DISTANCES);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DEBUG_LOGGED_MESSAGES_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_DEBUG_MESSAGE_LENGTH_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_FOG_FUNC_POINTS_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_3D_TEXTURE_SIZE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_ARRAY_TEXTURE_LAYERS);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_SPARSE_TEXTURE_SIZE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VERTEX_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_MAX_VIEWS_OVR);
-	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_FORMAT);
-	duk_gl_push_opengl_constant_property(ctx, GL_MINMAX_SINK);
-	duk_gl_push_opengl_constant_property(ctx, GL_MIN_LOD_WARNING_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_MIN_SPARSE_LEVEL_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_MULTIPLY_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_3DFX);
-	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_BIT_3DFX);
-	duk_gl_push_opengl_constant_property(ctx, GL_MULTISAMPLE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_NATIVE_GRAPHICS_BEGIN_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_NATIVE_GRAPHICS_END_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_NATIVE_GRAPHICS_HANDLE_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_NEGATIVE_ONE_TO_ONE);
-	duk_gl_push_opengl_constant_property(ctx, GL_NORMAL_BIT_PGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_NO_RESET_NOTIFICATION);
-	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_DISTANCE_TO_LINE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_DISTANCE_TO_POINT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_LINE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_OBJECT_POINT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_OCCLUSION_QUERY_EVENT_MASK_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_OVERLAY_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_PACK_IMAGE_DEPTH_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_PACK_RESAMPLE_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_PACK_ROW_BYTES_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PACK_SKIP_VOLUMES_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_R5_G6_B5_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGB5_A1_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGB8_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGBA4_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE4_RGBA8_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_R5_G6_B5_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGB5_A1_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGB8_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGBA4_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PALETTE8_RGBA8_OES);
-	duk_gl_push_opengl_constant_property(ctx, GL_PERCENTAGE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_PERFMON_RESULT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_PERFMON_RESULT_AVAILABLE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_PERFMON_RESULT_SIZE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_PERFORMANCE_MONITOR_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_FRAGMENT_ALPHA_SOURCE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_FRAGMENT_RGB_SOURCE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_GROUP_COLOR_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_PIXEL_TEXTURE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POINT_FADE_THRESHOLD_SIZE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MAX_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POINT_SIZE_MIN_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_ALPHA_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_BLUE_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_GREEN_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_COLOR_MATRIX_RED_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_ALPHA_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_BLUE_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_GREEN_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_BIAS);
-	duk_gl_push_opengl_constant_property(ctx, GL_POST_CONVOLUTION_RED_SCALE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PREFER_DOUBLEBUFFER_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_HISTOGRAM);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_COLOR_MATRIX_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_CONVOLUTION_COLOR_TABLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_1D_STACK_MESAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_2D_STACK_MESAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_4D_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_PURGEABLE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_ALPHA4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_ALPHA8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_INTENSITY4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_INTENSITY8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_LUMINANCE4_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_LUMINANCE8_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUAD_TEXTURE_SELECT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_ALL_EVENT_BITS_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_BUFFER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_BUFFER_BINDING_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_BY_REGION_NO_WAIT_INVERTED);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_BY_REGION_WAIT_INVERTED);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_DEPTH_BOUNDS_FAIL_EVENT_BIT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_DEPTH_FAIL_EVENT_BIT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_DEPTH_PASS_EVENT_BIT_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_NO_WAIT_INVERTED);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_OBJECT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_RESULT_NO_WAIT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_STENCIL_FAIL_EVENT_BIT_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_TARGET);
 	duk_gl_push_opengl_constant_property(ctx, GL_QUERY_WAIT_INVERTED);
-	duk_gl_push_opengl_constant_property(ctx, GL_RECLAIM_MEMORY_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_REDUCE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RED_MAX_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_RED_MIN_CLAMP_INGR);
-	duk_gl_push_opengl_constant_property(ctx, GL_RED_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_RELEASED_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_REPLACE_VALUE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_REPLICATE_BORDER);
-	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_AVERAGE_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_DECIMATE_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_REPLICATE_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_RESAMPLE_ZERO_FILL_OML);
 	duk_gl_push_opengl_constant_property(ctx, GL_RESET_NOTIFICATION_STRATEGY);
-	duk_gl_push_opengl_constant_property(ctx, GL_RETAINED_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB4_S3TC);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA4_DXT5_S3TC);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA4_S3TC);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_DXT5_S3TC);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_FLOAT16_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_FLOAT32_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_S3TC);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGBA_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_422_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_FLOAT16_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_FLOAT32_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_RAW_422_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_S3TC);
-	duk_gl_push_opengl_constant_property(ctx, GL_RGB_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_RG_SNORM);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_BUFFER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLER_OBJECT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_3DFX);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLES_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_MASK_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_ALPHA_TO_ONE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS_3DFX);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_BUFFERS_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_INVERT_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_MASK_VALUE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SAMPLE_PATTERN_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SCREEN_COORDINATES_REND);
-	duk_gl_push_opengl_constant_property(ctx, GL_SCREEN_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_SEPARABLE_2D);
-	duk_gl_push_opengl_constant_property(ctx, GL_SET_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_SHARPEN_TEXTURE_FUNC_POINTS_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_SOFTLIGHT_KHR);
-	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_BACK_OP_VALUE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_STENCIL_OP_VALUE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_CACHED_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_CLIENT_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_PRIVATE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_STORAGE_SHARED_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_STREAM_RASTERIZATION_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_STRICT_DEPTHFUNC_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_STRICT_LIGHTING_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_STRICT_SCISSOR_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_SUBSAMPLE_DISTANCE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_TABLE_TOO_LARGE);
-	duk_gl_push_opengl_constant_property(ctx, GL_TESSELLATION_FACTOR_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_TESSELLATION_MODE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD1_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD2_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD3_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXCOORD4_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_1D_STACK_BINDING_MESAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_1D_STACK_MESAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_2D_STACK_BINDING_MESAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_2D_STACK_MESAX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_4DSIZE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_4D_BINDING_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_4D_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_BASE_LEVEL_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COLOR_WRITEMASK_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CONSTANT_DATA_SUNX);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_FILTER4_SIZE_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LEVEL_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MAX_LOD_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_MIN_LOD_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RANGE_LENGTH_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_RANGE_POINTER_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_STORAGE_HINT_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_STORAGE_SPARSE_BIT_AMD);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_TARGET);
-	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_WRAP_Q_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_TRANSFORM_HINT_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNDEFINED_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_UNKNOWN_CONTEXT_RESET);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_CLIENT_STORAGE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_CONSTANT_DATA_SUNX);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_IMAGE_DEPTH_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_RESAMPLE_OML);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_ROW_BYTES_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_SKIP_VOLUMES_SGIS);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT64_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_INT_SAMPLER_BUFFER_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_8_8_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_UNSIGNED_SHORT_8_8_REV_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_VERSION_4_5);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX23_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX4_BIT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_BINDING_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_OBJECT_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_RANGE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_RANGE_LENGTH_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_RANGE_POINTER_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ARRAY_STORAGE_HINT_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_COEFF_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_DOMAIN_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_ORDER_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP1_SIZE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_COEFF_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_DOMAIN_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_ORDER_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ATTRIB_MAP2_SIZE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_CONSISTENT_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_DATA_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ELEMENT_SWIZZLE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_VERTEX_ID_SWIZZLE_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_X_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_Y_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_VIRTUAL_PAGE_SIZE_Z_AMD);
-	duk_gl_push_opengl_constant_property(ctx, GL_VOLATILE_APPLE);
-	duk_gl_push_opengl_constant_property(ctx, GL_WIDE_LINE_HINT_PGI);
-	duk_gl_push_opengl_constant_property(ctx, GL_YCBCR_422_APPLE);
 	duk_gl_push_opengl_constant_property(ctx, GL_ZERO_TO_ONE);
 #endif /* DUK_GL_OPENGL_4_5 */
 
@@ -8106,6 +10684,8 @@ void duk_gl_set_constants(duk_context *ctx)
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_POST_CONVOLUTION_COLOR_TABLE_SGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_PROXY_TEXTURE_COLOR_TABLE_SGI);
 	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_COLOR_TABLE_SGI);
+	duk_gl_push_opengl_constant_property(ctx, GL_TEXTURE_CONSTANT_DATA_SUNX);
+	duk_gl_push_opengl_constant_property(ctx, GL_UNPACK_CONSTANT_DATA_SUNX);
 #endif /* DUK_GL_SGI */
 
 #ifdef DUK_GL_SGIX

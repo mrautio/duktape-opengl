@@ -1,6 +1,10 @@
 /*
- *  Duktape OpenGL wrapper 0.1.
+ *  Duktape OpenGL 0.5 - OpenGL bindings for Duktape embeddable Javascript engine.
  *  See AUTHORS.rst and LICENSE.txt for copyright and licensing information.
+ *  
+ *  Duktape OpenGL: https://github.com/mrautio/duktape-opengl/
+ *  Duktape: http://duktape.org/
+ *  OpenGL API reference: https://www.opengl.org/registry/
  */
 
 /*
