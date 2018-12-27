@@ -1,5 +1,6 @@
 # duktape-opengl
-OpenGL bindings for Duktape embeddable Javascript engine
+Legacy OpenGL 1.x bindings for Duktape embeddable Javascript engine
+If you're looking for WebGL bindings check [duktape-webgl](https://github.com/mrautio/duktape-webgl)
 
 If you ended up here randomly and have no idea what Duktape is, then have a look at here: http://duktape.org/
 
